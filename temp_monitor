@@ -1,0 +1,80 @@
+#!/bin/bash
+
+#
+# Initial monitoring of hot water thermistor system.
+#
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools, and also access to 'zfs', which
+# is in /sbin (may not already be in the path if run as a cron job).
+PATH="$SCRIPT_DIR:/sbin:$PATH"
+
+ADC_CHANNEL_TANK=0
+ADC_CHANNEL_PIPE=2
+ADC_CHANNEL_PUMP=4
+
+get_adc ()
+{
+  adc.py $1
+}
+
+# Makes it easier to handle math with pesky floating points.
+# Second arg is the number of digits to show, defaulting to
+# zero if nothing given. For example:
+#
+#   `calc "2.1 + 1"` will echo back "3".
+#   `calc "2.1 + 1" 0` will also echo "3".
+#   `calc "2.1 + 1" 1` will echo "3.1"`
+calc ()
+{
+  local digits="$2"
+  [ "$digits" ] || digits=0
+
+  # Using awk to do the calculation as it's easier to
+  # force it to print the required number of digits
+  # (bc can be all over the place depending on its inputs)
+  # and because it'll produce sane output for 0.x values
+  # with a leading zero.
+  awk "BEGIN { printf( \"%.${digits}f\", $1 ) }"
+}
+
+volt_to_resistance ()
+{
+  local v_therm="$1"
+  local r_fixed=10000
+  local v_source=5.0
+
+  calc "($r_fixed * $v_therm) / ($v_source - $v_therm)" 0
+}
+
+start=$(date +%s)
+[ "$1" ] && start=$1
+
+while sleep 8.3 ; do
+
+  now=$(date +%s)
+
+  # Get A/D measurements for our available sensors.
+  tank=$(get_adc $ADC_CHANNEL_TANK)
+  pipe=$(get_adc $ADC_CHANNEL_PIPE)
+  pump=$(get_adc $ADC_CHANNEL_PUMP)
+
+  # Convert A/D readings to thermistor resistances.
+  tank_res=$(volt_to_resistance $tank)
+  pipe_res=$(volt_to_resistance $pipe)
+  pump_res=$(volt_to_resistance $pump)
+
+  # ...and then on to temperatures.
+  tank_temp=$(thermistor $tank_res)
+  pipe_temp=$(thermistor $pipe_res)
+  pump_temp=$(thermistor $pump_res)
+
+  elapsed=$((now - start))
+
+  echo "$now elapsed=$elapsed Ttank=$tank_temp Tpipe=$pipe_temp Tpump=$pump_temp Rtank=$tank_res Rpipe=$pipe_res Rpump=$pump_res Vtank=$tank Vpipe=$pipe Vpump=$pump "
+  
+done
+     

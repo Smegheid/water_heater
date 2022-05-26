@@ -1,0 +1,42 @@
+#!/bin/bash
+
+#
+# Initial monitoring of hot water thermistor system.
+#
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools, and also access to 'zfs', which
+# is in /sbin (may not already be in the path if run as a cron job).
+PATH="$SCRIPT_DIR:/sbin:$PATH"
+
+ADC_CHANNEL_TANK=0
+ADC_CHANNEL_PIPE=2
+ADC_CHANNEL_PUMP=3
+
+get_adc ()
+{
+  adc.py $1
+}
+
+
+start=$(date +%s)
+[ "$1" ] && start=$1
+
+while sleep 8.3 ; do
+
+  now=$(date +%s)
+
+  # Get A/D measurements for our available sensors.
+  tank=$(get_adc $ADC_CHANNEL_TANK)
+  pipe=$(get_adc $ADC_CHANNEL_PIPE)
+  pump=$(get_adc $ADC_CHANNEL_PUMP)
+
+  elapsed=$((now - start))
+
+  echo "$now elapsed=$elapsed tank=$tank pipe=$pipe pump=$pump"
+  
+done
+     

@@ -1,0 +1,21 @@
+#!/usr/bin/python3
+
+import sys
+from thermistor_utils import SH_converter
+
+# Coefficients that result in a match for the lookup table
+# in the Glodline GL30 manual.
+A, B, C = (0.001125308852122, 0.000234711863267,  0.000000085663516)
+
+conv = SH_converter(A, B, C)
+
+# Resistance from command line.
+R=int(sys.argv[1])
+
+# Convert to temp (C).
+T=conv.temperature(R)
+
+# For now, show both Celsius and F as Goldline manual lists the latter.
+print("R=%d => T=%0.1lfC T=%0.1fF" % (R, T, T*1.8 + 32), file=sys.stderr)
+print("%.1lf" % T)
+
