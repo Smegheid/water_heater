@@ -1,0 +1,172 @@
+#!/bin/bash
+#
+# water_heater_control
+#
+# Will eventually be the control loop for the solar water heater system.
+# Initially just records information as the final version would so that
+# I can get graphs up and running.
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools that should be in the same
+# location as this tool.
+PATH="$SCRIPT_DIR:$PATH"
+
+# Pick up common definitions for water heater stuff.
+. "$SCRIPT_DIR/common.sh"
+
+# Pi-16ADC channels for the sensors we're using.
+ADC_CHANNEL_TANK=0   # Tank's internal thermistor.
+ADC_CHANNEL_RETURN=2 # Taped to brass fitting on hot water return from panel.
+ADC_CHANNEL_PUMP=3   # Taped right below the pump pushing water up to panel.
+
+# Update period for loop.
+UPDATE_PERIOD=10
+
+# Lifetime of status info.
+STATUS_LIFETIME=$((UPDATE_PERIOD * 3))
+
+# Gets A/D measurements from all sensors. 'adc' is
+# a script that knows how to talk to the A/D hat.
+get_adc ()
+{
+  local status=0
+
+  volt_tank=$(adc $ADC_CHANNEL_TANK)
+  [ $? -ne 0 ] && status=$?
+  volt_return=$(adc $ADC_CHANNEL_RETURN)
+  [ $? -ne 0 ] && status=$?
+  volt_pump=$(adc $ADC_CHANNEL_PUMP)
+  [ $? -ne 0 ] && status=$?
+  
+  return $status
+}
+
+# Fiddles with Ohm's law to come up with a resistance
+# from the voltage at the midpoint of the divider on
+# each A/D channel. The fixed resistor is on top connected
+# to the positive rail, and the thermistor on the bottom.
+volt_to_resistance ()
+{
+  local v_therm="$1"  # Voltage across thermistor.
+  local r_fixed=10000 # Resistance of fixed divider resistor.
+  local v_source=5.0  # Positive rail of divider.
+
+  # We don't need fractions of Ohms here. The temperature
+  # dependence at normal temperatures just isn't that
+  # sensitive as we're still at several kOhm on the low end.
+  # We're also only sampling to the nearest mV, so there's
+  # a lot of loss of precision there, too.
+  calc "($r_fixed * $v_therm) / ($v_source - $v_therm)" 0
+}
+
+# Gets temperatures for all sensors. Takes A/D measurements
+# and then converts those to resistances and then temperatures.
+# For sensors named 'tank', 'return' aand 'pump', we get three
+# sets of global variables named:
+#   - temp_<sensor>: measured temp in C.
+#   - res_<sensor>: calculated resistance in Ohms.
+#   - volt_<sensor>: voltage measured by ADC.
+#
+# Will return 0 if the A/D conversions all completed, non-zero
+# otherwise. If any A/D conversions fail, then the variables'
+# content is not valid.
+get_temps ()
+{
+  # Get A/D measurements for all channels.
+  get_adc
+  [ $? -ne 0 ] && return $?  
+
+  # Convert voltages to resistances...
+  res_tank=$(volt_to_resistance $volt_tank)
+  res_return=$(volt_to_resistance $volt_return)
+  res_pump=$(volt_to_resistance $volt_pump)
+  
+  # ...and then on to temperatures.
+  temp_tank=$(thermistor $res_tank)
+  temp_return=$(thermistor $res_return)
+  temp_pump=$(thermistor $res_pump)  
+}
+
+# Produces current status in status file from global variables.
+update_status ()
+{
+  # Timestamp for this update.
+  local now=$(date +%s)
+
+  # Produces all info in status file. Old content is clobbered.
+  # The content of this file should be able to be sourced by a bourne
+  # shell in order to be turned into a series of variables.
+  #
+  # REMINDER: all string values must be quoted in spaces appear.
+  echo "# 
+#        time: UNIX time of update.
+#    lifetime: [s] Duration after which status info is no longer valid.
+#      expiry: UNIX time after which info is assumed to have expired. Effectively time + lifetime.
+#      status: $SS_COMMENT_STATUS
+#  pump_state: $SS_COMMENT_PUMP_STATE
+#  cont_state: $SS_COMMENT_CONT_STATE
+#   temp_tank: $SS_COMMENT_TEMP_TANK
+# temp_return: $SS_COMMENT_TEMP_RETURN
+#   temp_pump: $SS_COMMENT_TEMP_PUMP
+#    res_tank: $SS_COMMENT_RES_TANK
+#  res_return: $SS_COMMENT_RES_RETURN
+#    res_pump: $SS_COMMENT_RES_PUMP
+#   volt_tank: $SS_COMMENT_VOLT_TANK
+# volt_return: $SS_COMMENT_VOLT_RETURN
+#   volt_pump: $SS_COMMENT_VOLT_PUMP
+time=$now
+lifetime=$STATUS_LIFETIME
+expiry=$((now + STATUS_LIFETIME ))
+status=OK
+pump_state=\"unknown\"
+temp_tank=$temp_tank
+temp_return=$temp_return
+temp_pump=$temp_pump
+res_tank=$res_tank
+res_return=$res_return
+res_pump=$res_pump
+volt_tank=$volt_tank
+volt_return=$volt_return
+volt_pump=$volt_pump
+" > "$CONTROL_STATUS_FILE"
+
+  # For now, keep updating our legacy log file.
+  # echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump Rtank=$res_tank Rpipe=$res_return Rpump=$res_pump Vtank=$volt_tank Vpipe=$volt_return Vpump=$volt_pump" >> /tmp/volt.txt
+}
+
+# The A/D measurement time is somewhat inconsistent and not
+# under our control. Attempt to be somewhat monotonic by sleeping
+# until a particular time.
+sleep_until ()
+{
+  local now=$(date +%s.%N)
+  local remain=$(calc "$1 - $now" 2)
+
+  sleep "$remain"
+}
+
+##########################################################################
+
+while true ; do
+
+  now=$(date +%s)
+
+  # Get A/D measurements for our available sensors.
+  get_temps
+  if [ $? -ne 0 ] ; then
+    # Not sure what to do about this. Stop providing updates for now.
+    continue
+  fi
+
+  # We'd run the state machine here...
+
+  # Update the status of the controller.
+  update_status
+
+  # Wait until the next update time.
+  sleep_until $((now + $UPDATE_PERIOD))
+  
+done

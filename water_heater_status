@@ -1,0 +1,51 @@
+#!/bin/bash
+#
+# water_heater_status
+#
+# Takes the water heater controller's status file and publishes to statserv.
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools that should be in the same
+# location as this tool.
+PATH="$SCRIPT_DIR:/gpc/bin:$PATH"
+
+# Pick up common definitions for water heater stuff.
+. "$SCRIPT_DIR/common.sh"
+
+############################################################
+
+# If the status file does not exist, then we're stuffed.
+if [ ! -f "$CONTROL_STATUS_FILE" ] ; then
+  echo "error: Status file '$CONTROL_STATUS_FILE' does not exist."
+  exit 1  
+fi
+
+# Turn the status file into variables. Requires creator to maintain
+# discipline in file syntax.
+. "$CONTROL_STATUS_FILE"
+
+# The status file should contain an expiry time. Has this elapsed?
+now=$(date +%s)
+if [ $now -gt $expiry ] ; then
+  echo "warning: $CONTROL_STATUS FILE indicates info has expired. Currently $now, expiry $expiry."
+  exit 1
+fi
+
+# Publish our info into statserv.
+ssPut "$SS_TEMP_TANK" "$temp_tank" "COMMENT=$SS_COMMENT_TEMP_TANK" "LIFETIME=$lifetime"
+ssPut "$SS_TEMP_PUMP" "$temp_pump" "COMMENT=$SS_COMMENT_TEMP_PUMP" "LIFETIME=$lifetime"
+ssPut "$SS_TEMP_RETURN" "$temp_return" "COMMENT=$SS_COMMENT_TEMP_RETURN" "LIFETIME=$lifetime"
+ssPut "$SS_RES_TANK" "$res_tank" "COMMENT=$SS_COMMENT_RES_TANK" "LIFETIME=$lifetime"
+ssPut "$SS_RES_PUMP" "$res_pump" "COMMENT=$SS_COMMENT_RES_PUMP" "LIFETIME=$lifetime"
+ssPut "$SS_RES_RETURN" "$res_return" "COMMENT=$SS_COMMENT_RES_RETURN" "LIFETIME=$lifetime"
+ssPut "$SS_VOLT_TANK" "$volt_tank" "COMMENT=$SS_COMMENT_VOLT_TANK" "LIFETIME=$lifetime"
+ssPut "$SS_VOLT_PUMP" "$volt_pump" "COMMENT=$SS_COMMENT_VOLT_PUMP" "LIFETIME=$lifetime"
+ssPut "$SS_VOLT_RETURN" "$volt_return" "COMMENT=$SS_COMMENT_VOLT_RETURN" "LIFETIME=$lifetime"
+ssPut "$SS_STATUS" "$status" "COMMENT=$SS_COMMENT_STATUS""LIFETIME=$lifetime"
+ssPut "$SS_PUMP_STATE" "$pump_state" "COMMENT=$SS_COMMENT_PUMP_STATE" "LIFETIME=$lifetime"
+
+# For now, continue to update our legacy log file.
+echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump Rtank=$res_tank Rpipe=$res_return Rpump=$res_pump Vtank=$volt_tank Vpipe=$volt_return Vpump=$volt_pump"
