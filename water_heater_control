@@ -28,6 +28,18 @@ UPDATE_PERIOD=10
 # Lifetime of status info.
 STATUS_LIFETIME=$((UPDATE_PERIOD * 3))
 
+# States for the state machine. Using strings to
+# make this easier to follow.
+STATE_INIT="init"                # Entry state.
+STATE_WAIT_FOR_DAYTIME="waitday" # Failsafe; sits here with pump off if it's not daytime heating hours.
+STATE_WAIT_START="waitstart"     # Sun is up, pump off, monitoring panel temp for when to turn pump on.
+STATE_START_PUMP="pumpstart"     # Transition/delay state when turning pump on.
+STATE_TEST_PANEL_HOT="testpanel" # Short delay to test whether panel can actually make hot water.
+STATE_TANK_HEATING="heating"     # Pump is on, monitoring hot water being made.
+STATE_STOP_PUMP="pumpstop"       # Transition/delay state when turning pump off.
+STATE_PUMP_OFF_DELAY="pumpoffdelay"  # Pump has been turned off. Delay before we start making decisions again.
+STATE_DAYTIME_END="sleepytime"   # Daylight hours are over. Transitions out of current state to waiting.
+
 # Gets A/D measurements from all sensors. 'adc' is
 # a script that knows how to talk to the A/D hat.
 get_adc ()
@@ -40,7 +52,7 @@ get_adc ()
   [ $? -ne 0 ] && status=$?
   volt_pump=$(adc $ADC_CHANNEL_PUMP)
   [ $? -ne 0 ] && status=$?
-  
+
   return $status
 }
 
@@ -77,17 +89,17 @@ get_temps ()
 {
   # Get A/D measurements for all channels.
   get_adc
-  [ $? -ne 0 ] && return $?  
+  [ $? -ne 0 ] && return $?
 
   # Convert voltages to resistances...
   res_tank=$(volt_to_resistance $volt_tank)
   res_return=$(volt_to_resistance $volt_return)
   res_pump=$(volt_to_resistance $volt_pump)
-  
+
   # ...and then on to temperatures.
   temp_tank=$(thermistor $res_tank)
   temp_return=$(thermistor $res_return)
-  temp_pump=$(thermistor $res_pump)  
+  temp_pump=$(thermistor $res_pump)
 }
 
 # Produces current status in status file from global variables.
@@ -101,7 +113,7 @@ update_status ()
   # shell in order to be turned into a series of variables.
   #
   # REMINDER: all string values must be quoted in spaces appear.
-  echo "# 
+  echo "#
 #        time: UNIX time of update.
 #    lifetime: [s] Duration after which status info is no longer valid.
 #      expiry: UNIX time after which info is assumed to have expired. Effectively time + lifetime.
@@ -121,7 +133,7 @@ time=$now
 lifetime=$STATUS_LIFETIME
 expiry=$((now + STATUS_LIFETIME ))
 status=OK
-pump_state=\"unknown\"
+pump_state=$pump_state
 temp_tank=$temp_tank
 temp_return=$temp_return
 temp_pump=$temp_pump
@@ -145,10 +157,366 @@ sleep_until ()
   local now=$(date +%s.%N)
   local remain=$(calc "$1 - $now" 2)
 
+  echo "TEST: sleeping $remain sec until $1"
+
   sleep "$remain"
 }
 
+# Returns 0 if we're currently within the daytime hours
+# where we can make hot water, 1 otherwise.
+CONTROL_DAY_BEGIN="9 am"
+CONTROL_DAY_END="5 pm"
+daytime ()
+{
+  # What's the time?
+  local now=$(date +%s)
+
+  # figure out when daylight begins and ends.
+  local begin=$(date -d "$CONTROL_DAY_BEGIN" +%s)
+  local end=$(date -d "$CONTROL_DAY_END" +%s)
+
+  # Before the beginning of sunny time? Barf.
+  [ $now -lt $begin ] && return 1
+
+  # Sun's getting real low? Buh-bye.
+  [ $now -gt $end ] && return 1
+
+  # We should have sunlight to do heating.
+  return 0
+}
+
+# Shortcut to handle daylight hours ending while running.
+# Most states need to check this, so it's handled at each
+# entry to the state machine rather than  being splattered
+# all over the place.
+state_check_daytime_over ()
+{
+  # If we're definitely not running, then this isn't applicable.
+  case "$state" in
+    $STATE_INIT) return 0 ;;
+    $STATE_WAIT_FOR_DAYTIME) return 0 ;;
+  esac
+
+  if ! daytime ; then
+    echo "Daylight has ended while in '$state' state."
+    state=$STATE_DAYTIME_END
+  fi
+
+  return 0
+}
+
+# Controls the state of the pump. On success, 'pump_state' is updated,
+# and the function returns 0. Otherwise 'pump_state' is set to 'error'
+# and function returns non-zero.
+PUMP_CONTROL_OFF="off"
+PUMP_CONTROL_ON="on"
+PUMP_CONTROL_ERROR="error"
+pump_control ()
+{
+  local new_state="$1"
+  local status=""
+
+  # Sanitise input.
+  case "$new_state" in
+    $PUMP_CONTROL_ON) true ;;
+    $PUMP_CONTROL_OFF) true ;;
+    *)
+      echo "error: pump_control() requested to set pump to unknown state '$new_state'. Turning pump off."
+      new_state=$PUMP_CONTROL_OFF
+  esac
+
+  water_pump "$new_state"
+  status="$?"
+
+  if [ $status -ne 0 ]  ; then
+    echo "error: Error $status encountered when attempting to turn pump $new_state."
+    pump_state="$error"
+    return $status
+  fi
+
+  pump_state="$new_state"
+}
+
+# While the pump is off, this checks to see if we think the panel
+# is capable of heating the tank. Returns 0 if it looks like there's
+# heating available, 1 otherwise.
+panel_warm_pump_off ()
+{
+  # This is only valid if the pump is not running. Because the panel
+  # sensor is busted, we can only look at the return fitting for clues,
+  # and for that we need the pump off.
+  if [ "$pump_state" != "off" ] ; then
+    echo "error: panel_warm_pump_off called while pummp running."
+    return 1
+  fi
+
+  # ---
+  # This is all a kludge to work around the busted sensor. If it gets fixed,
+  # then replace everything between the '# ---' parts with a check of the
+  # actual sensor temp.
+
+  # What we've observed is that on a sunny day, with the pump off the temperature
+  # at the return fitting climbs very significantly and quite rapidly once the
+  # sun comes up. At the end of may, we saw a 15C rise in the return temp in only
+  # 10 minutes with the pump not running. On a cloudy day, we see nothing even
+  # close to that.
+  #
+  # If the tank is cold, then use an absolute temperature threshold at the fitting
+  # to guess if there's enough sun to start the pump. Otherwise, we'll say that
+  # if the fitting is above the tank temp, we can start.
+  TANK_COLD_THRESHOLD=35
+  TANK_COLD_FITTING_PANEL_HOT=40
+  if [ $(calc "$temp_tank < $TANK_COLD_THRESHOLD") = "1" ] ; then
+
+    # Hot return fitting suggests the panel's good to go.
+    [ $(calc "$temp_return >= $TANK_COLD_FITTING_PANEL_HOT") = "1" ] && return 0
+  else
+
+    # Just use the same criteria for when the pump is running.
+    panel_heating_water && return 0
+  fi
+  # ---
+
+  return 1
+}
+
+# Returns 0 if panel can heat water, 1 otherwise.
+panel_heating_water ()
+{
+  # Nothing fancy - if the return fitting is hotter
+  # than the tank, then empirical testing says it warms the
+  # tank water.
+  [ $(calc "$temp_return > $temp_tank") = "1" ] && return 0
+  return 1
+}
+
+# Returns 0 if the tank has reached the target temperature, or
+# 1 otherwise.
+TEMP_THRESH_TANK_HOT=55.7 #C, 135F.
+tank_hot ()
+{
+  [ $(calc "$temp_tank >= $TEMP_THRESH_TANK_HOT") = "1" ] && return 0
+
+  return 1
+}
+
+########################
+# State handlers.
+#
+# All handlers should set 'state_new' to the value of a new state
+# to jump to on stdout, or leave it alone if no action needs to
+# be taken.
+
+# Handles startup.
+state_handler_init ()
+{
+  echo "Initialising."
+
+  # Init timestamps for pump control. These are irrelevant.
+  pump_start_time=0
+  pump_stop_time=0
+
+  # Until we figure things out for ourselves, we always
+  # turn the pump off.
+  pump_control $PUMP_CONTROL_OFF
+
+  # We begin by checking to see if it's daytime.
+  state_new="$STATE_WAIT_FOR_DAYTIME"
+}
+
+# Waits for the sun to come up again. This is a parking state
+# where we ignore all temperatures and only look at the clock.
+# This should make sure we can't accidentally turn the pump
+# on in the middle of the night and flush all of our hot(ter)
+# water through the panel, cooling it down.
+state_handler_wait_for_daytime ()
+{
+  # Not yet daytime? Do nothing.
+  daytime || return
+
+  # The sun is now sufficiently up to start heating water again.
+  echo "Sufficient daylight exists to start water heater."
+  state_new=$STATE_WAIT_START
+}
+
+# During daytime, we wait here for signs that the panel is
+# capable of making hot water.
+state_handler_wait_start ()
+{
+  # If the tank is at temperature, then we do nothing.
+  tank_hot && return 0
+
+  # If the panel doesn't look like it can heat the tank,
+  # then bail.
+  ! panel_warm_pump_off && return 0
+
+  # The panel looks like it can make hot water, so away we go.
+  state_new=$STATE_START_PUMP
+}
+
+# We've been asked to startpumping water through the system.
+state_handler_start_pump ()
+{
+  echo "Starting pump."
+  pump_control $PUMP_CONTROL_ON
+
+  # Go to eyeballing if we actually have hot water available.
+  # Detection of this is based on running the pump for a short
+  # period, so we need to know when the pump was started.
+  pump_start_time=$(date +%s)
+
+  state_new=$STATE_TEST_PANEL_HOT
+}
+
+# This state is a workaround for the broken panel temperature
+# sensor. Before we drop into the regular monitoring loop, we
+# need to give the potential hot water to circulate through the
+# return, heating the fitting.
+TEST_PANEL_HOT_TIME=30 # seconds
+state_handler_test_panel_hot ()
+{
+  local now=$(date +%s)
+  local elapsed_since_pump_start=$((now - pump_start_time))
+
+  # If insufficient time has passed for water from the panel
+  # to heat the fitting, do nothing.
+  [ "$elapsed_since_pump_start" -gt $TEST_PANEL_HOT_TIME ] || return 0
+
+  # We've run the pump for long enough. Nothing fancy here
+  # with thresholds or anything - if the return looks warmer
+  # than the tank, then go for it.
+  if panel_heating_water ; then
+    echo "Panel producing hot water. Continuing."
+    state_new=$STATE_TANK_HEATING
+  else
+    echo "Panel not hot enough to heat tank. Stopping."
+    state_new=$STATE_STOP_HEATING # %%% STATE_PANEL_NOT_HOT?
+  fi
+}
+
+# Resting state while heating the tank water. Waits for the tank
+# to heat all the way up, or for the panel to stop producing
+# enough hot water.
+state_handler_tank_heating ()
+{
+  # If the tank has hit its target temperature, then we stop.
+  if tank_hot ; then
+    echo "logonly: Tank is at target temperature. Stopping pump."
+    pump_control $PUMP_CONTROL_OFF
+    return
+  fi
+
+  # If it looks like we're no longer capable of heating water, then
+  # stop the pump to preserve what we already have.
+  if ! panel_heating_water ; then
+    echo "logonly: Panel not producing enough hot water. Stopping pump."
+    pump_control $PUMP_CONTROL_OFF
+    return
+  fi
+
+  # We're still heating. Nothing left to do.
+}
+
+# Stops the pump then moves to a delay period.
+state_handler_pump_stop ()
+{
+  echo "Stopping pump."
+  pump_control $PUMP_CONTROL_OFF
+
+  # Because we don't have a working panel temperature
+  # sensor, we wait for a while to allow things to settle before
+  # we consider going again. To do that, we need to know when we
+  # stopped the pump.
+  pump_stop_time=$(date +%s)
+
+  state_new=$STATE_PUMP_OFF_DELAY
+}
+
+# Handles case where the sun is unavailable to heat water.
+state_handler_daytime_end ()
+{
+  echo "Daytime done. Turning off pump, waiting for tomorrow."
+  pump_control $PUMP_CONTROL_OFF
+  state_new="$STATE_WAIT_FOR_DAYTIME"
+}
+
+# Waits for a set period of time after turning the pump off.
+PUMP_OFF_DELAY_TIME=$((15 * 60 )) # seconds
+state_handler_pump_off_delay ()
+{
+  local now=$(date +%s)
+  local elapsed_since_pump_stop=$((now - pump_stop_time))
+
+  # If the settling time has not elapsed, then do nothing.
+  [ "$elapsed_since_pump_stop" -gt $PUMP_OFF_DELAY_TIME ] || return 0
+
+  echo "$PUMP_OFF_DELAY_TIME sec delay after pump off elapsed."
+  state_new=$STATE_WAIT_PANEL_HOT
+}
+
+# Executes the control state machine.
+#
+# When called, this will handle the processing of state transitions
+# until no more are needed for this pass. Most of the time this will
+# result in one handler function being called before returning, but
+# transitions result in a couple of rounds of handlers before settling
+# down again.
+state_machine ()
+{
+  local running="1"
+
+  echo "----- Runing state machine @ $(date +%s)"
+
+  # Most states require a check to see if daytime is done. We
+  # do that here once instead of in a bazillion places.
+set -x
+  state_check_daytime_over
+
+  while [ "$running" = "1" ] ; do
+
+    # State handlers soverride this to a new state if they want to
+    # switch, leave it alone otherwise.
+    state_new="$state"
+
+    echo "logonly: Processing state '$state'"
+
+    case "$state" in
+
+      $STATE_INIT) state_handler_init ;;
+      $STATE_WAIT_FOR_DAYTIME) state_handler_wait_for_daytime ;;
+      $STATE_WAIT_START) state_handler_wait_start ;;
+      $STATE_START_PUMP) state_handler_start_pump ;;
+      $STATE_TEST_PANEL_HOT) state_handler_test_panel_hot ;;
+      $STATE_TANK_HEATING) state_handler_tank_heating ;;
+      $STATE_STOP_PUMP) state_handler_stop_pump ;;
+      $STATE_PUMP_OFF_DELAY) state_handler_pump_off_delay ;;
+
+      # Daytime has ended. Turn off the pump, settle into waiting
+      # for the sun to come back up again.
+      $STATE_DAYTIME_END) state_handler_daytime_end ;;
+
+      *)
+        echo "warning: Unknown state '$state'. Restarting."
+	state_new=$STATE_INIT
+	;;
+    esac
+
+    # State transition? Otherwise, stop processing states.
+    if [ "$state_new" != "$state" ] ; then
+      echo "logonly:    State transition '$state' -> '$state_new'"
+      state="$state_new"
+    else
+      running=0
+    fi
+
+  done
+set +x
+}
+
 ##########################################################################
+
+# Start the state machine from the beginning.
+state=$STATE_INIT
 
 while true ; do
 
@@ -162,11 +530,12 @@ while true ; do
   fi
 
   # We'd run the state machine here...
+  state_machine
 
   # Update the status of the controller.
   update_status
 
   # Wait until the next update time.
   sleep_until $((now + $UPDATE_PERIOD))
-  
+
 done

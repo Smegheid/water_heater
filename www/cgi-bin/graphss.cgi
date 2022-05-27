@@ -125,12 +125,21 @@ generate_water_heater_temps ()
   # Because 'murca, temps are often expressed in F.
   set - "$@" "CDEF:temp_tank_f=temp_tank,1.8,*,32,+"
 
+  # Produce a visual indication of the periods when the pump
+  # is off. These will be an area behind the temperature traces.
+   set - "$@" "CDEF:pump_background=pump_state,0,EQ,INF,UNKN,IF"
+  #set - "$@" "CDEF:pump_off_area=1,pump_state,-,60*"
+
+  # Pump state goes behind the temperatures.
+  set - "$@" "AREA:pump_background#EAEAEA"
+   
   # Plot Temperatures for the parts of the system we care about.
   set - "$@" "LINE3:temp_tank${color0}: tank\g"
   set - "$@" "GPRINT:temp_tank:LAST: (%4.1lfC"
   set - "$@" "GPRINT:temp_tank_f:LAST: %4.1lfF)\t"
   set - "$@" "LINE3:temp_return${color1}: return\g"
-  set - "$@" "GPRINT:temp_return:LAST:(%4.1lfC)\n"
+  set - "$@" "GPRINT:temp_return:LAST:(%4.1lfC)\t"
+  set - "$@" "GPRINT:pump_state:LAST:Pump %.0lf\n"
 
   # We don't really want to exceed this tank temperature.
   set - "$@" "HRULE:57.77#cc5555"
@@ -139,7 +148,7 @@ generate_water_heater_temps ()
   # Generate the plot
   #
   case "$format" in
-    png) $RRDGRAPH -A -Y --upper-limit 40 --lower-limit 30 - $GRAPHOPTS "$@" ;;
+    png) $RRDGRAPH -A -Y --upper-limit 60 --lower-limit 28 - $GRAPHOPTS "$@" ;;
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
 }
