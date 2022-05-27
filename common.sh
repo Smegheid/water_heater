@@ -35,6 +35,22 @@ SS_COMMENT_VOLT_TANK="[V] Voltage across water tank thermistor."
 SS_COMMENT_VOLT_RETURN="[V] Voltage across return line sensor."
 SS_COMMENT_VOLT_PUMP="[V] voltage across pump sensor."
 
+
+####
+# PUMP CONTROL
+#
+# PUMP_CONTROL_TYPE must be one of the following:
+#   - "kasa": pump turned on and off by kasa wifi plug.
+#   - "gpio": pump managed by GPIO-controlled system.
+#
+# For kasa, PUMP_CONTROL_HOST must declare the hostname or IP address
+# of the relevant wifi plug.
+#
+# For GPIO, PUMP_CONTROL_GPIO must declare the gpio pin number (assuming
+# this is on an rPi).
+PUMP_CONTROL_TYPE="kasa"
+PUMP_CONTROL_HOST="192.168.0.45"
+
 ###########################################################
 # COMMON FUNCTIONS
 

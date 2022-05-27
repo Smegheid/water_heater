@@ -1,0 +1,18 @@
+#!/bin/bash
+#
+# water_pump - remote pump control via configured setup.
+#
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools that should be in the same
+# location as this tool.
+PATH="$SCRIPT_DIR:$PATH"
+
+# Pick up common definitions for water heater stuff.
+. "$SCRIPT_DIR/common.sh"
+
+water_pump.$PUMP_CONTROL_TYPE $@
+exit $?
