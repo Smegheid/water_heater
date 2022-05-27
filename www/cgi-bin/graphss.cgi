@@ -359,6 +359,7 @@ fi
 
 # Provide an explicit date format so that we get the same as what we've historically
 # explected from Sidious, as 'date' has changed its mind on the default format since.
+# The image map javascript expects a fixed format here, so we need to play nice.
 start_date=`date -d "1970-01-01 UTC +$start_sec sec" "+%a %b %d %H:%d:%S %Z %Y"`
 end_date=`date -d "1970-01-01 UTC +$end_sec sec" "+%a %b %d %H:%d:%S %Z %Y"`
 [ "$start" != "$start_sec" ] || start=$start_date
@@ -384,7 +385,8 @@ EOF
 # We need to state what graphs are currently being shown so that 
 # clicking the various fixed timescale links "remember" what we're
 # looking at.
-CURR_GRAPHS="graph1=$graph1&graph2=$graph2&graph3=$graph3&graph4=$graph4"
+  #CURR_GRAPHS="graph1=$graph1&graph2=$graph2&graph3=$graph3&graph4=$graph4"
+  CURR_GRAPHS="graph1=$graph1&graph2=$graph2"
 
 cat <<EOF
 
@@ -417,7 +419,7 @@ cat <<EOF
 
       <TD WIDTH=10><INPUT TYPE=submit NAME=plot VALUE=" Apply " DEFAULT></TD>
       <TD ALIGN=RIGHT WIDTH=10><INPUT TYPE=submit NAME=reset VALUE= " Reset "></TD>
-      <TD ALIGN=RIGHT WIDTH=100%><B><A HREF=/>Return to SVN</A></B></TD>
+      <TD ALIGN=RIGHT WIDTH=100%></TD>
     </TR>
     <TR>
       <TD ALIGN=RIGHT>To:  </TD><TD><INPUT TYPE=text NAME=end VALUE="$end" SIZE=28></TD>
@@ -442,19 +444,12 @@ cat<<EOF
 <!-- Content table -->
 <TABLE BORDER=0 CELLPADDING=0 CELLSPACING=1 BGCOLOR=$COLOR_PANEL WIDTH=100%>
 <TR>
-  <TD WIDTH=50% ALIGN=CENTER VALIGN=TOP>
+  <TD WIDTH=100% ALIGN=CENTER VALIGN=TOP>
     <!-- Graph 1 goes here... -->
 EOF
   generate_pulldown graph1
+  echo "<p>"
   generate_graph $graph1
-
-cat<<EOF
-  </TD>
-  <TD WIDTH=50% ALIGN=CENTER VALIGN=TOP>
-    <!-- Graph 2 goes here... -->
-EOF
-  generate_pulldown graph2
-  generate_graph $graph2
 
 cat<<EOF
   </TD>
@@ -466,20 +461,14 @@ cat<<EOF
   <INPUT TYPE=submit NAME=zoomin VALUE=" Zoom In (+) ">
   <INPUT TYPE=submit NAME=panright VALUE=" Pan Right -&gt; ">
 </TD></TR>
-<TR>
-  <TD WIDTH=50% ALIGN=CENTER VALIGN=TOP>
-    <!-- Graph 3 goes here... -->  
-EOF
-  generate_pulldown graph3
-  generate_graph $graph3 
 
-cat<<EOF
-  </TD>
-  <TD WIDTH=50% ALIGN=CENTER VALIGN=TOP>
-    <!-- Graph 4 goes here... -->
+<TR>
+  <TD WIDTH=100% ALIGN=CENTER VALIGN=TOP>
+    <!-- Graph 2 goes here... -->
 EOF
-  generate_pulldown graph4
-  generate_graph $graph4
+  generate_pulldown graph2
+  echo "<p>"
+  generate_graph $graph2
 
 cat<<EOF
   </TD>
