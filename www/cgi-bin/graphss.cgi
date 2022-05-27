@@ -214,7 +214,10 @@ generate_graph () {
     echo "<P>No graph selected"
   else
 
-    echo "<A HREF=\"$SCRIPT_NAME?$QUERY_STRING&dat=$graph\"><IMG BORDER=0 SRC=\"$SCRIPT_NAME?$QUERY_STRING&png=$graph\"></A>"
+    # Note use of inline-block for div style - this shrinks the div to the same size as the image it contains, rather
+    # than letting it expand to fill the table cell.
+    echo "<DIV style=\"display:inline-block\" ID=\"clickme$1\" onClick=\"click_to_centre(document, event, '$start', '$end', document['t\
+heform'], '$graph')\"><IMG BORDER=0 SRC=\"$SCRIPT_NAME?$QUERY_STRING&png=$graph\"></DIV>"
 
     if [ "$graph" == "lab_nitrogen" ] ; then
       echo "<IMG SRC=\"https://svn.ifa.hawaii.edu/gpc/archive/n2flow/n2flow_pretty.jpeg\">"
@@ -354,8 +357,10 @@ if [ "$panright" ]; then
   end=$end_sec
 fi
 
-start_date=`date -d "1970-01-01 UTC +$start_sec sec"`
-end_date=`date -d "1970-01-01 UTC +$end_sec sec"`
+# Provide an explicit date format so that we get the same as what we've historically
+# explected from Sidious, as 'date' has changed its mind on the default format since.
+start_date=`date -d "1970-01-01 UTC +$start_sec sec" "+%a %b %d %H:%d:%S %Z %Y"`
+end_date=`date -d "1970-01-01 UTC +$end_sec sec" "+%a %b %d %H:%d:%S %Z %Y"`
 [ "$start" != "$start_sec" ] || start=$start_date
 [ "$end" = "now" ] || end=$end_date
 [ "$stopfollow" ] && end=$end_date
@@ -384,7 +389,10 @@ CURR_GRAPHS="graph1=$graph1&graph2=$graph2&graph3=$graph3&graph4=$graph4"
 cat <<EOF
 
 <HTML>
-<HEAD><TITLE>Water Heater Graph Statserv</TITLE></HEAD>
+<HEAD>
+  <TITLE>Water Heater Graph Statserv</TITLE>
+  <SCRIPT SRC="../image_map.js" LANGUAGE="javascript" TYPE="text/javascript"></SCRIPT>
+</HEAD>
 <BODY BGCOLOR="$COLOR_BG" TEXT="$COLOR_FG" LINK="$COLOR_LINK" VLINK="$COLOR_LINK">
 <FORM NAME=theform>
 <TABLE BORDER=0 CELLPADDING=0 CELLSPACING=1 BGCOLOR=$COLOR_PANEL>
