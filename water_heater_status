@@ -52,8 +52,12 @@ case "$pump_state" in
   off) pump_state_num=0 ;;
   *) pump_state_num=-1 ;;
 esac
-
 ssPut "$SS_PUMP_STATE" "$pump_state_num" "COMMENT=$SS_COMMENT_PUMP_STATE" "LIFETIME=$lifetime"
 
+ssPut "$SS_CONTROL_STATE" "$control_state" "COMMENT=$SS_COMMENT_CONTROL_STATE" "LIFETIME=$lifetime"
+
 # For now, continue to update our legacy log file.
-echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump Rtank=$res_tank Rpipe=$res_return Rpump=$res_pump Vtank=$volt_tank Vpipe=$volt_return Vpump=$volt_pump pump_state=$pump_state"
+#echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump Rtank=$res_tank Rpipe=$res_return Rpump=$res_pump Vtank=$volt_tank Vpipe=$volt_return Vpump=$volt_pump pump_state=$pump_state"
+
+echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump pump_state=$pump_state control_state=$control_state"
+

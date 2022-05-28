@@ -2,8 +2,34 @@
 # water_heater_common.sh - common definitions for water heater system.
 #
 
+####
+# CONFIG
+#
+# Configurable settings.
+
+# Maximum tank temperature that the control script will
+# attempt to limit to.
+#
+# WARNING: SAFETY. Sticker on side of tank claims burns
+# in seconds at 140F.
+MAX_TANK_TEMP=55.7 #C, 135F.
+
+# Times of day where control script will attempt to operate.
+CONTROL_DAY_BEGIN="8:30 am"
+CONTROL_DAY_END="5 pm"
+
+####
+# STATUS FILE
+#
+# Path, etc. for status file produced by control script.
+
 # Current status from control script.
 CONTROL_STATUS_FILE="/tmp/water_heater/status"
+
+####
+# STATSERV
+#
+# Paths, etc for statserv info.
 
 # Root path of statserv info here.
 SS_PATH=/water_heater
@@ -11,6 +37,7 @@ SS_PATH=/water_heater
 # Values in statserv.
 SS_STATUS="$SS_PATH/status"
 SS_PUMP_STATE="$SS_PATH/pump_state"
+SS_CONTROL_STATE="$SS_PATH/control_state"
 SS_TEMP_TANK="$SS_PATH/temp_tank"
 SS_TEMP_PUMP="$SS_PATH/temp_pump"
 SS_TEMP_RETURN="$SS_PATH/temp_return"
@@ -24,6 +51,7 @@ SS_VOLT_RETURN="$SS_PATH/volt_return"
 # Comments for each statserv value.
 SS_COMMENT_STATUS="General status indication."
 SS_COMMENT_PUMP_STATE="[0|1] Boolean pump status."
+SS_COMMENT_CONTROL_STATE="Current control loop state"
 SS_COMMENT_CONT_STATE="Current state of control loop."
 SS_COMMENT_TEMP_TANK="[C] Temperature measured from water tank."
 SS_COMMENT_TEMP_RETURN="[C] Temperature measured on return from heater panel."

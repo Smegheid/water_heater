@@ -17,6 +17,12 @@ RRDFETCH="$RRDTOOL fetch"
 SSGET=/gpc/bin/ssGet
 SSGETCMT=/gpc/bin/ssGetCmt
 
+# Pick up settings from control system config.
+. ../../common.sh
+
+# Last control loop state.
+control_state=$($SSGET "$SS_CONTROL_STATE")
+
 # Name of the script determines which camera we're on.
 case "$(basename $0)" in
   graphss_h2rg.cgi)
@@ -146,7 +152,7 @@ generate_water_heater_temps ()
   set - "$@" "GPRINT:pump_state:LAST:Pump %.0lf\n"
 
   # We don't really want to exceed this tank temperature.
-  set - "$@" "HRULE:57.77#cc5555"
+  set - "$@" "HRULE:${MAX_TANK_TEMP}#cc5555"
 
   
   # Generate the plot
@@ -462,7 +468,7 @@ cat <<EOF
 
       <TD WIDTH=10><INPUT TYPE=submit NAME=plot VALUE=" Apply " DEFAULT></TD>
       <TD ALIGN=RIGHT WIDTH=10><INPUT TYPE=submit NAME=reset VALUE= " Reset "></TD>
-      <TD ALIGN=RIGHT WIDTH=100%></TD>
+      <TD ALIGN=LEFT WIDTH=100%><FONT SIZE=-1>State: $control_state</FONT></TD>
     </TR>
     <TR>
       <TD ALIGN=RIGHT>To:  </TD><TD><INPUT TYPE=text NAME=end VALUE="$end" SIZE=28></TD>

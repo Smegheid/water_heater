@@ -118,6 +118,7 @@ update_status ()
 #    lifetime: [s] Duration after which status info is no longer valid.
 #      expiry: UNIX time after which info is assumed to have expired. Effectively time + lifetime.
 #      status: $SS_COMMENT_STATUS
+#control_state: current control loop state
 #  pump_state: $SS_COMMENT_PUMP_STATE
 #  cont_state: $SS_COMMENT_CONT_STATE
 #   temp_tank: $SS_COMMENT_TEMP_TANK
@@ -133,6 +134,7 @@ time=$now
 lifetime=$STATUS_LIFETIME
 expiry=$((now + STATUS_LIFETIME ))
 status=OK
+control_state=\"$state\"
 pump_state=$pump_state
 temp_tank=$temp_tank
 temp_return=$temp_return
@@ -144,9 +146,6 @@ volt_tank=$volt_tank
 volt_return=$volt_return
 volt_pump=$volt_pump
 " > "$CONTROL_STATUS_FILE"
-
-  # For now, keep updating our legacy log file.
-  # echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump Rtank=$res_tank Rpipe=$res_return Rpump=$res_pump Vtank=$volt_tank Vpipe=$volt_return Vpump=$volt_pump" >> /tmp/volt.txt
 }
 
 # The A/D measurement time is somewhat inconsistent and not
@@ -155,7 +154,7 @@ volt_pump=$volt_pump
 sleep_until ()
 {
   local now=$(date +%s.%N)
-  local remain=$(calc "$1 - $now" 2)
+  local remain=$(calc "$1 - $now" 1)
 
   echo "TEST: sleeping $remain sec until $1"
 
@@ -164,8 +163,6 @@ sleep_until ()
 
 # Returns 0 if we're currently within the daytime hours
 # where we can make hot water, 1 otherwise.
-CONTROL_DAY_BEGIN="9 am"
-CONTROL_DAY_END="5 pm"
 daytime ()
 {
   # What's the time?
@@ -292,10 +289,9 @@ panel_heating_water ()
 
 # Returns 0 if the tank has reached the target temperature, or
 # 1 otherwise.
-TEMP_THRESH_TANK_HOT=55.7 #C, 135F.
 tank_hot ()
 {
-  [ $(calc "$temp_tank >= $TEMP_THRESH_TANK_HOT") = "1" ] && return 0
+  [ $(calc "$temp_tank >= $MAX_TANK_TEMP") = "1" ] && return 0
 
   return 1
 }
