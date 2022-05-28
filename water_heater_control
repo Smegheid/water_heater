@@ -344,6 +344,8 @@ state_handler_wait_for_daytime ()
 state_handler_wait_start ()
 {
   # If the tank is at temperature, then we do nothing.
+  # %%% We presumably need to have some sort of hysteresis here.
+  # tank_hot only checks if we're above the shutoff temp.
   tank_hot && return 0
 
   # If the panel doesn't look like it can heat the tank,
@@ -390,29 +392,54 @@ state_handler_test_panel_hot ()
     state_new=$STATE_TANK_HEATING
   else
     echo "Panel not hot enough to heat tank. Stopping."
-    state_new=$STATE_STOP_HEATING # %%% STATE_PANEL_NOT_HOT?
+    state_new=$STATE_PUMP_STOP
   fi
 }
+
+# Number of consecutive sniffs of a cool panel while the pump is on
+# before we shut it down.
+PANEL_COOL_REPS_THRSH=6 # about a minute
 
 # Resting state while heating the tank water. Waits for the tank
 # to heat all the way up, or for the panel to stop producing
 # enough hot water.
+panel_cool_reps=0
 state_handler_tank_heating ()
 {
-  # If the tank has hit its target temperature, then we stop.
+  # If the tank has hit its target temperature, then we stop. The
+  # tank sensor is not noisy (at least at the time of writing) so
+  # we stop immediately.
   if tank_hot ; then
     echo "logonly: Tank is at target temperature. Stopping pump."
-    pump_control $PUMP_CONTROL_OFF
+    state_new=$STATE_PUMP_STOP
+
+    # Clear out our counter for the next time round.
+    panel_cool_reps=0
     return
   fi
 
   # If it looks like we're no longer capable of heating water, then
-  # stop the pump to preserve what we already have.
+  # stop the pump to preserve what we already have. However, we only
+  # do this after a few repetitions so that we don't shut the pump
+  # off prematurely - when the pump is turned off we incur a sizeable
+  # delay before we'll turn it back on, so we want to be sure.
   if ! panel_heating_water ; then
+    panel_cool_reps=$((panel_cool_reps+1))
+    echo "logonly: $panel_cool_reps/$PANEL_COOL_REPS_THRSH passes with return lower than tank."
+  else
+    panel_cool_reps=0
+  fi
+
+  # We've hit our limit on the panel cooling. Stop the pump.
+  if [ "$panel_cool_reps" -ge $PANEL_COOL_REPS_THRSH ] ; then
     echo "logonly: Panel not producing enough hot water. Stopping pump."
-    pump_control $PUMP_CONTROL_OFF
+    state_new=$STATE_PUMP_STOP
     return
   fi
+
+  # %%% Do we want to consider turning the pump off if we sit at
+  # a given tank temp for too long? Might be hard to manage history
+  # if someone decides to use some hot water while we're on.
 
   # We're still heating. Nothing left to do.
 }
