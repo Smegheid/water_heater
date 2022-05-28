@@ -125,6 +125,9 @@ generate_water_heater_temps ()
   # Because 'murca, temps are often expressed in F.
   set - "$@" "CDEF:temp_tank_f=temp_tank,1.8,*,32,+"
 
+  # Delta between temperatures.
+  set - "$@" "CDEF:temp_delta=temp_return,temp_tank,-"
+
   # Produce a visual indication of the periods when the pump
   # is off. These will be an area behind the temperature traces.
    set - "$@" "CDEF:pump_background=pump_state,0,EQ,INF,UNKN,IF"
@@ -139,6 +142,7 @@ generate_water_heater_temps ()
   set - "$@" "GPRINT:temp_tank_f:LAST: %4.1lfF)\t"
   set - "$@" "LINE3:temp_return${color1}: return\g"
   set - "$@" "GPRINT:temp_return:LAST:(%4.1lfC)\t"
+  set - "$@" "GPRINT:temp_delta:LAST: delta %4.1lfC \t"
   set - "$@" "GPRINT:pump_state:LAST:Pump %.0lf\n"
 
   # We don't really want to exceed this tank temperature.
@@ -152,6 +156,39 @@ generate_water_heater_temps ()
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
 }
+
+generate_water_heater_temp_delta ()
+{
+  format="$1" ; shift
+  draw_title="$1" ; shift
+
+  RRD_FILE="$RRD_DIR/water_heater_temps_lt"
+  
+  set - --start "$start_sec" --end "$end_sec"
+
+  if [ "$draw_title" == "draw_title" ] ; then
+    set - --title="$GRAPH_TITLE_generate_water_heater_temp_delta"
+  fi
+
+  # Info from the database. We care about the tank and return
+  # temperatures.
+  set - "$@" "DEF:temp_tank=$RRD_FILE:temp_tank:MAX"
+  set - "$@" "DEF:temp_return=$RRD_FILE:temp_return:MAX"
+
+  # Delta between temperatures.
+  set - "$@" "CDEF:temp_delta=temp_return,temp_tank,-"
+  # Plot Temperatures for the parts of the system we care about.
+  set - "$@" "LINE3:temp_delta${color3}: Temp delta\g"
+  set - "$@" "GPRINT:temp_delta:LAST: (%4.1lfC)\n"
+  
+  # Generate the plot
+  #
+  case "$format" in
+    png) $RRDGRAPH -A -Y - $GRAPHOPTS "$@" ;;
+    dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
+  esac
+}
+
 
 ###############################################################################
 # 2U COMPUTER FUNCTIONS
@@ -226,8 +263,10 @@ heform'], '$graph')\"><IMG BORDER=0 SRC=\"$SCRIPT_NAME?$QUERY_STRING&png=$graph\
 }
 
 ALL_GRAPHS="water_heater_temps \
+water_heater_temp_delta
 "
 GRAPH_TITLE_water_heater_temps="Water heater temperatures"
+GRAPH_TITLE_water_heater_temp_delta="Water heater temperature delta (return - tank)"
 
 generate_pulldown () {
   graph="$1"
@@ -254,8 +293,12 @@ EOF
 
 
 set_defaults () {
-  start="2 days ago"
+  start="1 day ago"
   end="now"
+
+  # Start with these graphs if they're not explicitly given.
+  [ "$graph1" ] || graph1=water_heater_temps
+  [ "$graph2" ] || graph2=water_heater_temp_delta
 }
 
 ###############################################################################
@@ -504,7 +547,8 @@ EOF
 fi
 
 case "$dataset" in
-  water_heater_temps) generate_water_heater_temps $format ;;    
+  water_heater_temps) generate_water_heater_temps $format ;;
+  water_heater_temp_delta) generate_water_heater_temp_delta $format ;;
 #  server_temps) generate_server_temps $CAM $format ;;
 esac
 
