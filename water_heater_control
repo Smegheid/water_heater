@@ -388,7 +388,7 @@ state_handler_test_panel_hot ()
     state_new=$STATE_TANK_HEATING
   else
     echo "Panel not hot enough to heat tank. Stopping."
-    state_new=$STATE_PUMP_STOP
+    state_new=$STATE_STOP_PUMP
   fi
 }
 
@@ -407,7 +407,7 @@ state_handler_tank_heating ()
   # we stop immediately.
   if tank_hot ; then
     echo "logonly: Tank is at target temperature. Stopping pump."
-    state_new=$STATE_PUMP_STOP
+    state_new=$STATE_STOP_PUMP
 
     # Clear out our counter for the next time round.
     panel_cool_reps=0
@@ -429,7 +429,7 @@ state_handler_tank_heating ()
   # We've hit our limit on the panel cooling. Stop the pump.
   if [ "$panel_cool_reps" -ge $PANEL_COOL_REPS_THRSH ] ; then
     echo "logonly: Panel not producing enough hot water. Stopping pump."
-    state_new=$STATE_PUMP_STOP
+    state_new=$STATE_STOP_PUMP
     return
   fi
 
@@ -441,7 +441,7 @@ state_handler_tank_heating ()
 }
 
 # Stops the pump then moves to a delay period.
-state_handler_pump_stop ()
+state_handler_stop_pump ()
 {
   echo "Stopping pump."
   pump_control $PUMP_CONTROL_OFF
