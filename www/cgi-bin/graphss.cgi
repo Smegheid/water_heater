@@ -158,7 +158,7 @@ generate_water_heater_temps ()
   # Generate the plot
   #
   case "$format" in
-    png) $RRDGRAPH -A -Y --upper-limit 60 --lower-limit 28 - $GRAPHOPTS "$@" ;;
+    png) $RRDGRAPH -A --upper-limit 60 --lower-limit 28 - $GRAPHOPTS "$@" ;;
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
 }
@@ -190,7 +190,7 @@ generate_water_heater_temp_delta ()
   # Generate the plot
   #
   case "$format" in
-    png) $RRDGRAPH -A -Y - $GRAPHOPTS "$@" ;;
+    png) $RRDGRAPH -A --lower-limit 0 - $GRAPHOPTS "$@" ;;
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
 }

@@ -36,7 +36,26 @@ get_state ()
 
 pump_control ()
 {
-  kasa --host $PUMP_CONTROL_HOST --type plug $1 >> /dev/null
+  local retries=5
+  local status=""  
+
+  # Allow a small number of retries to actuate the pump control.
+  # WIth the wifi plug stuck out of the way, sometimes this doesn't
+  # work first time, and we want to try to make sure we get the message
+  # across.
+  while [ $retries -gt 0 ] ; do
+    
+    kasa --host $PUMP_CONTROL_HOST --type plug $1 >> /dev/null
+    status=$?
+
+    [ $status = 0 ] && return 0
+
+    echo "warning: Failed to turn pump $1. $retries reteies left."
+    sleep 1
+    retries=$((retries - 1))
+  done
+
+  echo "error: Failed to turn pump $1."
   return $?  
 }
 

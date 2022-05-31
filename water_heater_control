@@ -100,6 +100,11 @@ get_temps ()
   temp_tank=$(thermistor $res_tank)
   temp_return=$(thermistor $res_return)
   temp_pump=$(thermistor $res_pump)
+
+  # A lot of decisions are taken on the difference between
+  # the temperatures of the return from the panel and the
+  # tank, so let's just calculate that once and be done with it.
+  temp_delta=$(calc "$temp_return - $temp_tank" 1 )
 }
 
 # Produces current status in status file from global variables.
@@ -212,6 +217,7 @@ pump_control ()
 {
   local new_state="$1"
   local status=""
+  local retries=5
 
   # Sanitise input.
   case "$new_state" in
@@ -226,8 +232,8 @@ pump_control ()
   status="$?"
 
   if [ $status -ne 0 ]  ; then
-    echo "error: Error $status encountered when attempting to turn pump $new_state."
-    pump_state="$error"
+    echo "error: Failed to to turn pump $new_state."
+    pump_state="$PUMP_CONTROL_ERROR"
     return $status
   fi
 
@@ -239,10 +245,13 @@ pump_control ()
 # heating available, 1 otherwise.
 panel_warm_pump_off ()
 {
+  local delta_thrsh=0
+  local temp_tank_int=${temp_tank%%.*}  
+    
   # This is only valid if the pump is not running. Because the panel
   # sensor is busted, we can only look at the return fitting for clues,
   # and for that we need the pump off.
-  if [ "$pump_state" != "off" ] ; then
+  if [ "$pump_state" != "$PUMP_CONTROL_OFF" ] ; then
     echo "error: panel_warm_pump_off called while pummp running."
     return 1
   fi
@@ -258,19 +267,25 @@ panel_warm_pump_off ()
   # 10 minutes with the pump not running. On a cloudy day, we see nothing even
   # close to that.
   #
-  # If the tank is cold, then use an absolute temperature threshold at the fitting
-  # to guess if there's enough sun to start the pump. Otherwise, we'll say that
-  # if the fitting is above the tank temp, we can start.
-  TANK_COLD_THRESHOLD=35
-  TANK_COLD_FITTING_PANEL_HOT=40
-  if [ $(calc "$temp_tank < $TANK_COLD_THRESHOLD") = "1" ] ; then
+  # If the tank is cold, then use a larger return-tank delta threshold before
+  # starting the pump. The notion is this will happen first thing in the morning,
+  # and we want to be fairly sure we're ready to go before getting going.
+  # In the mid-range, we let this drop a little, and once the tank is quite hot, we
+  # raise the threshold for getting going again.
+  case "$temp_tank_int" in
+    1?) delta_thrsh=10 ;; # Shouldn't ever really happen? Can tank get below 20C here?
+    2?) delta_thrsh=6 ;; # Quite cold. Make sure lots of hot water available.
+    31|32|33|34) delta_thrsh=4 ;; # Colder tank, presumably early morning, harder to start.
+    3?|4?) delta_thrsh=2 ;;
+    50|51|52) delta_thrsh=2.5 ;;
+    53|54) delta_thrsh=3 ;;
+    *) delta_thrsh=4 ;; # Tank is quite hot. Don't bother starting until panel is really hot.
+  esac
+  echo "TEST: tank ${temp_tank}C -> using restart delta threshold ${delta_thrsh}C."
 
-    # Hot return fitting suggests the panel's good to go.
-    [ $(calc "$temp_return >= $TANK_COLD_FITTING_PANEL_HOT") = "1" ] && return 0
-  else
-
-    # Just use the same criteria for when the pump is running.
-    panel_heating_water && return 0
+  if [ $(calc "$temp_delta > $delta_thrsh") = "1" ] ; then
+    echo "TEST: delta $temp_thrsh suggests panel hot."
+    return 0
   fi
   # ---
 
@@ -283,7 +298,7 @@ panel_heating_water ()
   # Nothing fancy - if the return fitting is hotter
   # than the tank, then empirical testing says it warms the
   # tank water.
-  [ $(calc "$temp_return > $temp_tank") = "1" ] && return 0
+  [ $(calc "$temp_delta > 0") = "1" ] && return 0
   return 1
 }
 
@@ -470,6 +485,13 @@ state_handler_pump_off_delay ()
   local now=$(date +%s)
   local elapsed_since_pump_stop=$((now - pump_stop_time))
 
+  # If the temperature delta has skyrocketed, then there's
+  # obviously hot water available. Go early.
+  if [ $(calc "$temp_delta > 6") = "1" ] ; then
+    echo "Large temp delta $temp_delta C while waiting after pump off. Restarting."
+    state_new=$STATE_WAIT_PANEL_HOT
+  fi
+  
   # If the settling time has not elapsed, then do nothing.
   [ "$elapsed_since_pump_stop" -gt $PUMP_OFF_DELAY_TIME ] || return 0
 
@@ -488,13 +510,14 @@ state_machine ()
 {
   local running="1"
 
-  echo "----- Runing state machine @ $(date +%s)"
+  echo "TEST: ----- Runing state machine @ $(date +%s)"
+  echo "TEST: tank/return/delta temps: $temp_tank / $temp_return / $temp_delta C."
 
   # Most states require a check to see if daytime is done. We
   # do that here once instead of in a bazillion places.
-set -x
+set +x
   state_check_daytime_over
-
+set -x
   while [ "$running" = "1" ] ; do
 
     # State handlers soverride this to a new state if they want to
