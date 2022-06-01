@@ -15,7 +15,7 @@
 MAX_TANK_TEMP=55.7 #C, 135F.
 
 # Times of day where control script will attempt to operate.
-CONTROL_DAY_BEGIN="8:30 am"
+CONTROL_DAY_BEGIN="8:20 am"
 CONTROL_DAY_END="5 pm"
 
 ####

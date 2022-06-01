@@ -19,7 +19,7 @@ PATH="$SCRIPT_DIR:/gpc/bin:$PATH"
 
 # If the status file does not exist, then we're stuffed.
 if [ ! -f "$CONTROL_STATUS_FILE" ] ; then
-  echo "error: Status file '$CONTROL_STATUS_FILE' does not exist."
+  echo "error: Status file '$CONTROL_STATUS_FILE' does not exist." 1>&2
   exit 1  
 fi
 
@@ -28,9 +28,10 @@ fi
 . "$CONTROL_STATUS_FILE"
 
 # The status file should contain an expiry time. Has this elapsed?
+set -x
 now=$(date +%s)
 if [ $now -gt $expiry ] ; then
-  echo "warning: $CONTROL_STATUS FILE indicates info has expired. Currently $now, expiry $expiry."
+  echo "warning: $CONTROL_STATUS FILE indicates info has expired. Currently $now, expiry $expiry." 1>&2
   exit 1
 fi
 

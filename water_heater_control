@@ -40,6 +40,14 @@ STATE_STOP_PUMP="pumpstop"       # Transition/delay state when turning pump off.
 STATE_PUMP_OFF_DELAY="pumpoffdelay"  # Pump has been turned off. Delay before we start making decisions again.
 STATE_DAYTIME_END="sleepytime"   # Daylight hours are over. Transitions out of current state to waiting.
 
+# Wait time following pump being turned off adjusts based on how
+# often the pump is turned off and how long it consistently runs for.
+PUMP_OFF_MIN_TIME=$((2*60))
+PUMP_OFF_MAX_TIME=$((32*60))
+pump_off_wait=$PUMP_OFF_MIN_TIME
+
+#################################################################
+
 # Gets A/D measurements from all sensors. 'adc' is
 # a script that knows how to talk to the A/D hat.
 get_adc ()
@@ -135,6 +143,7 @@ update_status ()
 #   volt_tank: $SS_COMMENT_VOLT_TANK
 # volt_return: $SS_COMMENT_VOLT_RETURN
 #   volt_pump: $SS_COMMENT_VOLT_PUMP
+#  pump_off_t: [s] Next pump off wait period.
 time=$now
 lifetime=$STATUS_LIFETIME
 expiry=$((now + STATUS_LIFETIME ))
@@ -150,6 +159,7 @@ res_pump=$res_pump
 volt_tank=$volt_tank
 volt_return=$volt_return
 volt_pump=$volt_pump
+pump_off_t=$pump_off_wait
 " > "$CONTROL_STATUS_FILE"
 }
 
@@ -261,32 +271,54 @@ panel_warm_pump_off ()
   # then replace everything between the '# ---' parts with a check of the
   # actual sensor temp.
 
-  # What we've observed is that on a sunny day, with the pump off the temperature
-  # at the return fitting climbs very significantly and quite rapidly once the
-  # sun comes up. At the end of may, we saw a 15C rise in the return temp in only
-  # 10 minutes with the pump not running. On a cloudy day, we see nothing even
-  # close to that.
+  # We have tried several temperature-based detection methods to try to
+  # take a guess when the pump is off if the system can heat water. However,
+  # there are wildly different behaviours in various operating ranges when
+  # the pump is off. For example, when the tank is cold, the return temperature
+  # will rise significantly even first thing in the morning on a less than clear
+  # day. However, if the tank has been heated significantly (somewhere north of 45C)
+  # the return temperature plummets when the pump is turned off and doesn't really
+  # recover.
   #
-  # If the tank is cold, then use a larger return-tank delta threshold before
-  # starting the pump. The notion is this will happen first thing in the morning,
-  # and we want to be fairly sure we're ready to go before getting going.
-  # In the mid-range, we let this drop a little, and once the tank is quite hot, we
-  # raise the threshold for getting going again.
-  case "$temp_tank_int" in
-    1?) delta_thrsh=10 ;; # Shouldn't ever really happen? Can tank get below 20C here?
-    2?) delta_thrsh=6 ;; # Quite cold. Make sure lots of hot water available.
-    31|32|33|34) delta_thrsh=4 ;; # Colder tank, presumably early morning, harder to start.
-    3?|4?) delta_thrsh=2 ;;
-    50|51|52) delta_thrsh=2.5 ;;
-    53|54) delta_thrsh=3 ;;
-    *) delta_thrsh=4 ;; # Tank is quite hot. Don't bother starting until panel is really hot.
-  esac
-  echo "TEST: tank ${temp_tank}C -> using restart delta threshold ${delta_thrsh}C."
+  # For example, in the first week of testing, we observed a shutdown a little
+  # after noon due to a passing cloud and simultaneous hot water consumption.
+  # The delta temperature dropped to a couple of degrees beow 0C, and didn't
+  # recover for more than half an hour. However, when the pump was turned on
+  # manually, the return shot up past 90C and settled exponentially, happily
+  # heating water after that point with around a 3C delta. Basically, there
+  # can be all the sunshine in the world, but the return sits at or below around
+  # the tank temperature. Some kind of thermally-activated check valve? No idea.
+  #
+  # The only thing I can think of right now is to just speculatively run
+  # the pump to test the water. If we allow it into the TEST_PANEL_HOT state,
+  # then a minimum period is allowed for water to be pumped from the panel
+  # through the return, whose fitting will reflect whether there's hot water
+  # available after only a couple of cycles. Without a sensor up on the roof,
+  # that's the only way we can know for sure if there's hot water available.
+  # 
+  # In order to avoid waste by repeatedly pumping hot water up to the panel
+  # and cooling it on a cloudy day, we vary the delay in the pump off state
+  # along the lines of the following:
+  #
+  # - Pump off: increase delay exponentially.
+  # - Pump on consistently: reduce delay linearly.
+  #
+  # This is kinda sorta like TCP's exponential backoff, probably implemented
+  # in a far worse fashion. The intent is that if we keep seeing that it's
+  # cloudy, then we build up a history in the pump off delay that results in
+  # the delay growing longer and less hot water being wasted by speculatively
+  # running the pump. Conversely, we recognise prolonged periods of sunny
+  # conditions by gradually dropping the next delay period.
+  #
+  # The end result is that this is all handled elsewhere - the pump off
+  # delay state handler increases the next wait period once it completes its
+  # current delay, and the tank heating state handler decreases it. As such,
+  # all we now do here is tell the system it can go:
+  return 0
 
-  if [ $(calc "$temp_delta > $delta_thrsh") = "1" ] ; then
-    echo "TEST: delta $temp_thrsh suggests panel hot."
-    return 0
-  fi
+  # That makes this function kind of an anachronism, but this at least gives us
+  # somewhere that documents the thought process.
+  
   # ---
 
   return 1
@@ -306,9 +338,62 @@ panel_heating_water ()
 # 1 otherwise.
 tank_hot ()
 {
-  [ $(calc "$temp_tank >= $MAX_TANK_TEMP") = "1" ] && return 0
+  if [ $(calc "$temp_tank >= $MAX_TANK_TEMP") = "1" ] ; then
+    echo "TEST: Tank hot! ($temp_tank >= $MAX_TANK_TEMP" 	
+    return 0
+  fi
 
   return 1
+}
+
+# Adjusts waiting period following turning the pump off.
+#
+# This is part of the kludge with the broken panel sensor. We've seen
+# during testing that if the pump is turned off when the tank is already
+# quite warm, the return temperature seems to collapse and does not recover
+# the way that it usually does when the sun's out and the tank's cool.
+# Instead, we try to figure out whether the panel can heat water by speculatively
+# turning the pump on for a short period of time and then turning it off again.
+# In order to reduce the amount of hot water that's wasted, we increase the wait
+# period quickly if the pump keeps getting turned off, and reduce it slowly if
+# it's run consistently. This function handles those operations; the state handlers
+# are responsible for invoking it.
+pump_off_adj_time=0
+pump_off_wait_adjust ()
+{
+  # The wait period gets bigger exponentially, but backs off
+  # linearly.
+  local INC_MULT=2
+  local DEC_STEP=$((2*60))
+  
+  local now=$(date +%s)
+  local time_since_last_adj=$((now - pump_off_adj_time))
+    
+  case "$1" in
+    reset) pump_off_wait=$PUMP_OFF_MIN_TIME ;;
+    increase)
+      pump_off_wait=$((pump_off_wait * INC_MULT))
+      [ "$pump_off_wait" -gt $PUMP_OFF_MAX_TIME ] && pump_off_wait=$PUMP_OFF_MAX_TIME
+      ;;
+
+    decrease)
+      # Only allow adjustments once per minute.
+      [ "$time_since_last_adj" -lt 60 ] && return
+	
+      # Drop the next timeout period.
+      pump_off_wait=$((pump_off_wait - DEC_STEP))
+      [ "$pump_off_wait" -lt $PUMP_OFF_MIN_TIME ] && pump_off_wait=$PUMP_OFF_MIN_TIME
+      ;;
+
+    *)
+      echo "warning: Unknown pump timeout adjustment '$1' ignored."
+      return
+  esac
+
+  # Remember the last update time.
+  pump_off_adj_time="$now"
+
+  echo "TEST: pump off wait $1 to $pump_off_wait sec @ $pump_off_adj_time."
 }
 
 ########################
@@ -327,6 +412,9 @@ state_handler_init ()
   pump_start_time=0
   pump_stop_time=0
 
+  # Reset the wait period for when the pump is turned off.
+  pump_off_wait_adjust reset
+  
   # Until we figure things out for ourselves, we always
   # turn the pump off.
   pump_control $PUMP_CONTROL_OFF
@@ -426,6 +514,13 @@ state_handler_tank_heating ()
 
     # Clear out our counter for the next time round.
     panel_cool_reps=0
+
+    # We're turning the pump off because the tank is hot, not because
+    # of any problem with no hot water available. It's unlikely we can
+    # hit this without consistent sunshine, but just in case, we clear
+    # out the accumulated wait period.
+    pump_off_wait_adjust reset
+    
     return
   fi
 
@@ -452,7 +547,10 @@ state_handler_tank_heating ()
   # a given tank temp for too long? Might be hard to manage history
   # if someone decides to use some hot water while we're on.
 
-  # We're still heating. Nothing left to do.
+  # We're still heating. If this is consistent, then we gradually reduce
+  # the wait period the next time the pump turns off.
+  pump_off_wait_adjust decrease
+
 }
 
 # Stops the pump then moves to a delay period.
@@ -485,18 +583,15 @@ state_handler_pump_off_delay ()
   local now=$(date +%s)
   local elapsed_since_pump_stop=$((now - pump_stop_time))
 
-  # If the temperature delta has skyrocketed, then there's
-  # obviously hot water available. Go early.
-  if [ $(calc "$temp_delta > 6") = "1" ] ; then
-    echo "Large temp delta $temp_delta C while waiting after pump off. Restarting."
-    state_new=$STATE_WAIT_PANEL_HOT
-  fi
-  
   # If the settling time has not elapsed, then do nothing.
-  [ "$elapsed_since_pump_stop" -gt $PUMP_OFF_DELAY_TIME ] || return 0
+  [ "$elapsed_since_pump_stop" -gt $pump_off_wait ] || return 0
 
   echo "$PUMP_OFF_DELAY_TIME sec delay after pump off elapsed."
-  state_new=$STATE_WAIT_PANEL_HOT
+  state_new=$STATE_WAIT_START
+
+  # Until we know otherwise, we'll wait even longer next time the
+  # pump is turned off.
+  pump_off_wait_adjust increase
 }
 
 # Executes the control state machine.
