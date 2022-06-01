@@ -365,6 +365,13 @@ pump_off_wait_adjust ()
   # linearly.
   local INC_MULT=2
   local DEC_STEP=$((2*60))
+
+  # Minimum time between period drops. Must be larger than the panel check
+  # time (TEST_PANEL_HOT_TIME) and the length of time it takes to figure out
+  # consecutive cold return samples (6 at 10-sec intervals) combined, otherwise
+  # this ends up getting dropped almost immediately after a restart and never
+  # gets a chance to build.
+  local DEC_PERIOD=$((3*60))
   
   local now=$(date +%s)
   local time_since_last_adj=$((now - pump_off_adj_time))
@@ -377,8 +384,10 @@ pump_off_wait_adjust ()
       ;;
 
     decrease)
-      # Only allow adjustments once per minute.
-      [ "$time_since_last_adj" -lt 60 ] && return
+      # Only allow adjustments periodically. This needs to account for the
+      # time taken in the test panel state otherwise we reduce an increased
+      # delay period almost immediately.
+      [ "$time_since_last_adj" -lt $DEC_PERIOD ] && return
 	
       # Drop the next timeout period.
       pump_off_wait=$((pump_off_wait - DEC_STEP))
