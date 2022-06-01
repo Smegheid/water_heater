@@ -1,0 +1,61 @@
+#!/bin/bash
+
+#
+# Periodically publishes info about RPi host to statserv.
+#
+# Requries use of `vcgencmd` - user must have rights to 'video' group
+# to be able to poke through /dev/vchiq
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We may need some of our other tools? Not sure. We do need our
+# statserv stuff, however.
+PATH="$SCRIPT_DIR:/gpc/bin:$PATH"
+
+# Definitely need our common config.
+. "$SCRIPT_DIR/common.sh"
+
+UPDATE_PERIOD=30
+SS_LIFETIME=$((UPDATE_PERIOD * 3))
+
+# Reads back CPU temp, puts it in 'cpu_temp' variable.
+get_cpu_temp ()
+{
+  # vcgencmd produces a line that looks like "temp=60.7'C". Cut the temp
+  # out of that string.
+  cpu_temp=$(vcgencmd measure_temp | cut -d"=" -f2 | tr -cd "[:digit:].")  
+}
+
+# Picks out memory-related info,
+get_mem_info ()
+{
+  local mem_info="$(free | grep Mem)"
+  
+  mem_avail=$(echo "$mem_info" | awk '{print $7}')
+  mem_free=$(echo "$mem_info" | awk '{print $4}')
+}
+
+# Dumps available info to statserv.
+publish_host_info ()
+{
+  [ "$cpu_temp" ] &&  ssPut "$SS_PI_CPU_TEMP"  "$cpu_temp"  "COMMENT=$SS_COMMENT_PI_CPU_TEMP"  LIFETIME=$SS_LIFETIME
+  [ "$mem_avail" ] && ssPut "$SS_PI_MEM_AVAIL" "$mem_avail" "COMMENT=$SS_COMMENT_PI_MEM_AVAIL" LIFETIME=$SS_LIFETIME
+  [ "$mem_avail" ] && ssPut "$SS_PI_MEM_FREE"  "$mem_free"  "COMMENT=$SS_COMMENT_PI_MEM_FREE"  LIFETIME=$SS_LIFETIME
+
+  # In case we're following along in 'screen...'
+  echo "$(date +%s): cpu_temp=$cpu_temp mem_avail=$mem_avail mem_free=$mem_free"
+}
+
+##################################################
+
+# This isn't complicated. Simple loop that endlessly grabs info from
+# various aspects of the system and dumps them to statserv.
+while sleep $UPDATE_PERIOD ; do
+
+  get_cpu_temp
+  get_mem_info
+  publish_host_info
+
+done
