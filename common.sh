@@ -94,7 +94,14 @@ PUMP_CONTROL_TYPE="gpio"
 # Pump control is on this GPIO pin. Chosen because it has no other
 # duties listed under any circumstances, and the pin and a ground
 # are next to each other at the "bottom" of the GPIO block on the
-# "inside" of the board.
+# "inside" of the board. This makes the likelihood of a wiring oops
+# a lot less than picking something in the middle of the block, though
+# pin 21 was also an option (the two pins on the very end of the block).
+#
+# Pinout diagram is splattered everywhere, I used this one:
+#
+#  https://learn.sparkfun.com/tutorials/raspberry-gpio/gpio-pinout
+#
 PUMP_CONTROL_GPIO=26
 
 ###########################################################
