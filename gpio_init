@@ -1,0 +1,112 @@
+#!/bin/bash
+#
+# gpio_init: sets up required GPIO pin for pump control.
+#
+# Does initial GPIO setup for systems where the relay that controls
+# the water heater systems's pump is controlled from a GPIO pin.
+# At the time of writing, the relay is a DLI IoT relay, but this could
+# be pretty much anything that takes a 3.3V signal.
+#
+# Assumes that the host is a raspberry pi. We don't need anything
+# fancy, so this just pokes the controls through sysfs.
+
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools that should be in the same
+# location as this tool.
+PATH="$SCRIPT_DIR:$PATH"
+
+# Pick up common definitions for water heater stuff.
+. "$SCRIPT_DIR/common.sh"
+
+# For whatever reason, after exporting a GPIO pin the kernel takes
+# a significant time (in CPU terms) to make the controls ready. What
+# we've seen in testing is that the directory $GPIO_PATH is available
+# immediately, but most of the controls are still assigned to the 'root'
+# group.
+#
+# A delay is needed, but I didn't want to make it a fixed duration as
+# I don't understand the mechanism. This waits for the 'value' entry
+# to become usable by members of the 'gpio' group on the (possibly
+# misguided) assumption that whatever process is dealing with this
+# starts at the top and walks through everything in alphabetical order
+# when reassigning groups.
+#
+# Oh, and as a piece of really weird trivia, if we let this loop spin
+# as hard as it can without the sleep, we actually see the node tested
+# temporarily assigned the 'dialout' group for some really odd reason
+# before settling. Again, no idea.
+wait_for_permissions ()
+{
+  local retries=50
+  local group=""  
+
+  while [ $retries -gt 0 ] ; do
+    # Produces only the group name, and none of the other usual fluff.
+    group=$(stat -c %G "$GPIO_PATH/value")
+
+    # Group has been reassigned. Good to go.
+    [ "$group" = "gpio" ] && return 0
+
+    # Nope. Have another go in a short while.
+    retries=$((retries - 1))
+    sleep 0.1
+  done
+
+  echo "error: Unable to get permission for controls to GPIO bit in $GPIO_PATH."
+  return 1  
+}
+
+#######################################################
+
+if [ "$PUMP_CONTROL_TYPE" != "gpio" ] ; then
+    echo "error: Water pump control not configured for GPIO."
+    exit 1
+fi
+
+if [ -z "$PUMP_CONTROL_GPIO" ] ; then
+    echo "error: GPIO pin number not configured."
+    exit 1
+fi
+
+# All GPIO controls in sysfs live here.
+GPIO_BASE="/sys/class/gpio"
+
+# Once configured, all of the GPIO settings will be here.
+GPIO_PATH="$GPIO_BASE/gpio${PUMP_CONTROL_GPIO}"
+
+# Declare our interest in the chosen GPIO pin. Only do this if it
+# hasn't already been exposed; repeating ourselves results in a
+# device busy error.
+if [ ! -d "$GPIO_PATH" ] ; then
+  echo "$PUMP_CONTROL_GPIO" > "$GPIO_BASE/export"
+  if [ $? -ne 0 ] ; then
+    echo "error: Failed to export GPIO pin $PUMP_CONTROL_GPIO."
+    exit 1
+  fi
+fi
+
+# Not sure why, but it appears to take time for the kernel to
+# sort this out. Without a delay here, what we end up with is
+# that the symlink for the exported GPIO pin is made, but most
+# of the controls are still in the 'root' group instead of
+# the expected ;gpio' group. If we don't hold back here, then
+# we end up with permission errors.
+wait_for_permissions || exit 1
+
+# Set the pin up as an output.
+echo out > "$GPIO_PATH/direction"
+if [ $? -ne 0 ] ; then
+  echo "error: Failed to set GPIO pin $PUMP_CONTROL_GPIO as an output."
+  exit 1
+fi
+
+# Pin will be active high.
+echo 0 > "$GPIO_PATH/active_low"
+if [ $? -ne 0 ] ; then
+  echo "error: Failed to set GPIO pin $PUMP_CONTROL_GPIO as active high."
+  exit 1
+fi

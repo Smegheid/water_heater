@@ -63,6 +63,16 @@ SS_COMMENT_VOLT_TANK="[V] Voltage across water tank thermistor."
 SS_COMMENT_VOLT_RETURN="[V] Voltage across return line sensor."
 SS_COMMENT_VOLT_PUMP="[V] voltage across pump sensor."
 
+# Info about host raspberry pi goes here.
+SS_PI_PATH="$SS_PATH/pi"
+
+SS_PI_CPU_TEMP="$SS_PI_PATH/cpu_temp"
+SS_PI_MEM_AVAIL="$SS_PI_PATH/mem_avail"
+SS_PI_MEM_FREE="$SS_PI_PATH/mem_free"
+
+SS_COMMENT_PI_CPU_TEMP="[C] Host RPi CPU temperature."
+SS_COMMENT_PI_MEM_AVAIL="[kiB] Host RPi available memory."
+SS_COMMENT_PI_MEM_FREE="[kiB] Host RPi free memory."
 
 ####
 # PUMP CONTROL
@@ -76,8 +86,16 @@ SS_COMMENT_VOLT_PUMP="[V] voltage across pump sensor."
 #
 # For GPIO, PUMP_CONTROL_GPIO must declare the gpio pin number (assuming
 # this is on an rPi).
-PUMP_CONTROL_TYPE="kasa"
-PUMP_CONTROL_HOST="192.168.0.45"
+PUMP_CONTROL_TYPE="gpio"
+
+# Address of the kasa plug. Switched to GPIO, not used.
+#PUMP_CONTROL_HOST="192.168.0.45"
+
+# Pump control is on this GPIO pin. Chosen because it has no other
+# duties listed under any circumstances, and the pin and a ground
+# are next to each other at the "bottom" of the GPIO block on the
+# "inside" of the board.
+PUMP_CONTROL_GPIO=26
 
 ###########################################################
 # COMMON FUNCTIONS

@@ -1,0 +1,96 @@
+#!/bin/bash
+#
+# water_pump.gpio - pump control via GPIO.
+#
+# GPIO control for relay that controls water heater systems's pump.
+# At the time of writing, this is a DLI IoT relay, but this could
+# be pretty much anything that takes a 3.3V signal.
+#
+# Assumes that the host is a raspberry pi. We don't need anything
+# fancy, so this just pokes the controls through sysfs.
+
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools that should be in the same
+# location as this tool.
+PATH="$SCRIPT_DIR:$PATH"
+
+# Pick up common definitions for water heater stuff.
+. "$SCRIPT_DIR/common.sh"
+
+get_state ()
+{
+  local state=$(cat "$GPIO_PATH/value")
+
+  if [ $? -ne 0 ] ; then
+    echo error
+    return 1  
+  fi
+
+  case "$state" in
+    1) echo 1 ;;
+    0) echo 0 ;;
+    *) echo "error" ; return 1 ;;
+  esac
+}
+
+pump_control ()
+{
+  # sysfs interface to the GPIO bit is dead simple. Just poke the new
+  # state as a binary number straight to the node.
+  case "$1" in
+    on) echo 1 > "$GPIO_PATH_CONTROL" ;;
+    off) echo 0 > "$GPIO_PATH_CONTROL" ;;
+    *)
+      echo "error: '$1' not a valid pump state."
+      exit 1
+      ;;
+  esac
+    
+  # This should be reliable enough to not need retries. Just check if
+  # that succeeded and take that as the way things will be.
+  if [ $? -ne 0 ] ; then
+    echo "error: Failed to turn pump $1."
+    exit 1
+  fi
+}
+
+######################################################
+
+if [ "$PUMP_CONTROL_TYPE" != "gpio" ] ; then
+  echo "error: Water pump control not configured for GPIO."
+  exit 1
+fi
+
+if [ -z "$PUMP_CONTROL_GPIO" ] ; then
+  echo "error: GPIO pin number not configured."
+  exit 1
+fi
+
+# All sysfs controls for the GPIO pin are here. We assume that
+# the init work has been done on startup, but a cheap check is
+# to make sure that the pin has been exported already.
+GPIO_PATH="/sys/class/gpio/gpio${PUMP_CONTROL_GPIO}"
+if [ ! -d "$GPIO_PATH" ] ; then
+  # We could just barf here, but since we already have an init
+  # procedure, we might as well use it.
+  echo "warning: GPIO for pump control not set up. Initialising."
+  gpio_init || exit 1
+
+  # Always start with the pump turned off.
+  pump_control off
+fi
+
+# The control for the GPIO is here.
+GPIO_PATH_CONTROL="$GPIO_PATH/value"
+
+case "$1" in
+  1|on) pump_control on ;;
+  0|off) pump_control off ;;
+  state) get_state ;;
+esac
+
+exit $?
