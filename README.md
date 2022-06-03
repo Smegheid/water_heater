@@ -1,6 +1,6 @@
 # Solar Water Heater Control Kludge
 
-This is a small set of scripts that I'm throwing together to manage control of the pump on the solar water heater system we have at home, and as a result the temperature of the water in the tank. Because of the very particular set of circumstances involved,
+This is a small set of scripts that I'm throwing together to manage control of the pump on the solar water heater system we have at home, and as a result the temperature of the water in the tank. This is meant to deal with a very particular set of circumstances; it is not intended as a general-purpose tool.
 
 I've set up a repository for this on github for my own convenience. I'm not sure this will be of use to anyone, but if you want to use it, then go right ahead. Since this is public, I figured I should at least pen some deranged ramblings about what's going on.
 
@@ -20,7 +20,7 @@ Since I already had a raspberry pi to spare and had a wifi remote plug on hand (
 
 ## Hardware
 
-The system started out with a raspberry pi that was unused, and a Kasa HS105 plug. Because we all love hacking, linux control of these plugs is a mere [pip install](https://python-kasa.readthedocs.io/en/latest/) away. The wifi plug was soon abandoned in favour of a relay that can be controlled via GPIO=, but more on that later.
+The system started out with a raspberry pi that was unused, and a Kasa HS105 plug. Because we all love hacking, linux control of these plugs is a mere [pip install](https://python-kasa.readthedocs.io/en/latest/) away. The wifi plug was soon abandoned in favour of a relay that can be controlled via GPIO, but more on that later.
 
 The only equipment i had to buy to start experimenting was:
   - An A/D converter hat (I settled on the [Pi-16ADC](https://alchemy-power.com/pi-16adc/)).
