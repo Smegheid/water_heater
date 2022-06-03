@@ -20,7 +20,9 @@ PATH="$SCRIPT_DIR:$PATH"
 # Pi-16ADC channels for the sensors we're using.
 ADC_CHANNEL_TANK=0   # Tank's internal thermistor.
 ADC_CHANNEL_RETURN=2 # Taped to brass fitting on hot water return from panel.
-ADC_CHANNEL_PUMP=3   # Taped right below the pump pushing water up to panel.
+ADC_CHANNEL_PUMP=4   # Taped right below the pump pushing water up to panel.
+ADC_CHANNEL_SUPPLY=3 # Supply to the house from the tank. Not sure if useful for control,
+                     # but we had a spare channel, so might as well use it.
 
 # Update period for loop.
 UPDATE_PERIOD=10
@@ -59,6 +61,8 @@ get_adc ()
   volt_return=$(adc $ADC_CHANNEL_RETURN)
   [ $? -ne 0 ] && status=$?
   volt_pump=$(adc $ADC_CHANNEL_PUMP)
+  [ $? -ne 0 ] && status=$?
+  volt_supply=$(adc $ADC_CHANNEL_SUPPLY)
   [ $? -ne 0 ] && status=$?
 
   return $status
@@ -103,11 +107,13 @@ get_temps ()
   res_tank=$(volt_to_resistance $volt_tank)
   res_return=$(volt_to_resistance $volt_return)
   res_pump=$(volt_to_resistance $volt_pump)
+  res_supply=$(volt_to_resistance $volt_supply)
 
   # ...and then on to temperatures.
   temp_tank=$(thermistor $res_tank)
   temp_return=$(thermistor $res_return)
   temp_pump=$(thermistor $res_pump)
+  temp_supply=$(thermistor $res_supply)
 
   # A lot of decisions are taken on the difference between
   # the temperatures of the return from the panel and the
@@ -137,12 +143,15 @@ update_status ()
 #   temp_tank: $SS_COMMENT_TEMP_TANK
 # temp_return: $SS_COMMENT_TEMP_RETURN
 #   temp_pump: $SS_COMMENT_TEMP_PUMP
+# temp_supply: $SS_COMMENT_TEMP_SUPPLY
 #    res_tank: $SS_COMMENT_RES_TANK
 #  res_return: $SS_COMMENT_RES_RETURN
 #    res_pump: $SS_COMMENT_RES_PUMP
+#  res_supply: $SS_COMMENT_RES_SUPPLY
 #   volt_tank: $SS_COMMENT_VOLT_TANK
 # volt_return: $SS_COMMENT_VOLT_RETURN
 #   volt_pump: $SS_COMMENT_VOLT_PUMP
+# volt_supply: $SS_COMMENT_VOLT_SUPPLY
 #  pump_off_t: [s] Next pump off wait period.
 time=$now
 lifetime=$STATUS_LIFETIME
@@ -153,12 +162,15 @@ pump_state=$pump_state
 temp_tank=$temp_tank
 temp_return=$temp_return
 temp_pump=$temp_pump
+temp_supply=$temp_supply
 res_tank=$res_tank
 res_return=$res_return
 res_pump=$res_pump
+res_supply=$res_supply
 volt_tank=$volt_tank
 volt_return=$volt_return
 volt_pump=$volt_pump
+volt_supply=$volt_supply
 pump_off_t=$pump_off_wait
 " > "$CONTROL_STATUS_FILE"
 }
@@ -615,7 +627,7 @@ state_machine ()
   local running="1"
 
   echo "TEST: ----- Runing state machine @ $(date +%s)"
-  echo "TEST: tank/return/delta temps: $temp_tank / $temp_return / $temp_delta C."
+  echo "TEST: tank/return/delta/supply temps: $temp_tank / $temp_return / $temp_delta / $temp_supply C."
 
   # Most states require a check to see if daytime is done. We
   # do that here once instead of in a bazillion places.

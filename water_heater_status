@@ -28,7 +28,6 @@ fi
 . "$CONTROL_STATUS_FILE"
 
 # The status file should contain an expiry time. Has this elapsed?
-set -x
 now=$(date +%s)
 if [ $now -gt $expiry ] ; then
   echo "warning: $CONTROL_STATUS FILE indicates info has expired. Currently $now, expiry $expiry." 1>&2
@@ -39,12 +38,15 @@ fi
 ssPut "$SS_TEMP_TANK" "$temp_tank" "COMMENT=$SS_COMMENT_TEMP_TANK" "LIFETIME=$lifetime"
 ssPut "$SS_TEMP_PUMP" "$temp_pump" "COMMENT=$SS_COMMENT_TEMP_PUMP" "LIFETIME=$lifetime"
 ssPut "$SS_TEMP_RETURN" "$temp_return" "COMMENT=$SS_COMMENT_TEMP_RETURN" "LIFETIME=$lifetime"
+ssPut "$SS_TEMP_SUPPLY" "$temp_supply" "COMMENT=$SS_COMMENT_TEMP_SUPPLY" "LIFETIME=$lifetime"
 ssPut "$SS_RES_TANK" "$res_tank" "COMMENT=$SS_COMMENT_RES_TANK" "LIFETIME=$lifetime"
 ssPut "$SS_RES_PUMP" "$res_pump" "COMMENT=$SS_COMMENT_RES_PUMP" "LIFETIME=$lifetime"
 ssPut "$SS_RES_RETURN" "$res_return" "COMMENT=$SS_COMMENT_RES_RETURN" "LIFETIME=$lifetime"
+ssPut "$SS_RES_SUPPLY" "$res_supply" "COMMENT=$SS_COMMENT_RES_SUPPLY" "LIFETIME=$lifetime"
 ssPut "$SS_VOLT_TANK" "$volt_tank" "COMMENT=$SS_COMMENT_VOLT_TANK" "LIFETIME=$lifetime"
 ssPut "$SS_VOLT_PUMP" "$volt_pump" "COMMENT=$SS_COMMENT_VOLT_PUMP" "LIFETIME=$lifetime"
 ssPut "$SS_VOLT_RETURN" "$volt_return" "COMMENT=$SS_COMMENT_VOLT_RETURN" "LIFETIME=$lifetime"
+ssPut "$SS_VOLT_SUPPLY" "$volt_supply" "COMMENT=$SS_COMMENT_VOLT_SUPPLY" "LIFETIME=$lifetime"
 ssPut "$SS_STATUS" "$status" "COMMENT=$SS_COMMENT_STATUS" "LIFETIME=$lifetime"
 
 # Translate text pump status into a value for the graphs.
@@ -60,5 +62,5 @@ ssPut "$SS_CONTROL_STATE" "$control_state" "COMMENT=$SS_COMMENT_CONTROL_STATE" "
 # For now, continue to update our legacy log file.
 #echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump Rtank=$res_tank Rpipe=$res_return Rpump=$res_pump Vtank=$volt_tank Vpipe=$volt_return Vpump=$volt_pump pump_state=$pump_state"
 
-echo "$now Ttank=$temp_tank Tpipe=$temp_return Tpump=$temp_pump pump_state=$pump_state control_state=$control_state"
+echo "$now Ttank=$temp_tank Trtn=$temp_return Tpump=$temp_pump Tsup=$temp_supply pump_state=$pump_state control_state=$control_state"
 
