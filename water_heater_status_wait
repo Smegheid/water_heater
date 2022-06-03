@@ -1,0 +1,49 @@
+#!/bin/bash
+#
+# water_heater_status_wait
+#
+# Waits for the control process' status file to be updated and then publishes
+# the info to statserv.
+#
+# Based on 'inotifywait', installed as part of the 'inotify-tools' package on
+# debian& its offspring.
+
+# Figures out where this script was run from.
+SCRIPT_FULL_PATH="$(cd "${0%/*}" 2>/dev/null; echo "$PWD"/"${0##*/}")"
+SCRIPT_DIR=$(dirname "$SCRIPT_FULL_PATH")
+
+# We need some of our other tools that should be in the same
+# location as this tool.
+PATH="$SCRIPT_DIR:$PATH"
+
+# Pick up common definitions for water heater stuff.
+. "$SCRIPT_DIR/common.sh"
+
+############################################################
+
+# If 'inotifywait' does not exist, then there's no point in even
+# considering running.
+if ! which inotifywait > /dev/null ; then
+  echo "error: 'inotifywait' is required but does not exist. Unable to continue."
+  exit 1
+fi
+
+# Loop endlessly, but don't eat a CPU core alive if something
+# goes badly wrong.
+while sleep 0.2 ; do
+
+  # Wait for the status file to be updated.
+  info=$(inotifywait "$CONTROL_STATUS_FILE" 2>&1 | grep -v "Setting up watches")
+
+  # If something went wrong, then we can't update anything.
+  # Produce a warning and then wait a little bit before trying again.
+  if [ $? -ne 0 ] ; then
+    echo "error: Failed to wait for update of status file: $info."
+    sleep 5
+    continue
+  fi
+
+  # Pick up the new status.
+  water_heater_status
+
+done
