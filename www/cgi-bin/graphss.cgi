@@ -107,13 +107,15 @@ GRAPHOPTS="-h $GRAPH_HEIGHT -w $GRAPH_WIDTH \
 THUMBOPTS="-h 76 -w 76 -j"
 
 ###############################################################################
-# CAMERA 1 FUNCTIONS
+# HEATER CONTROL GRAPHS
 generate_water_heater_temps ()
 {
   format="$1" ; shift
   draw_title="$1" ; shift
 
   RRD_FILE="$RRD_DIR/water_heater_temps_lt"
+  RRD_FILE_HOUSE="$RRD_DIR/water_tank_supply_lt"
+
   
   set - --start "$start_sec" --end "$end_sec"
 
@@ -128,6 +130,10 @@ generate_water_heater_temps ()
   set - "$@" "DEF:temp_pump=$RRD_FILE:temp_pump:MAX"
   set - "$@" "DEF:pump_state=$RRD_FILE:pump_state:MAX"
 
+  # The supply to the house (hot water out fitting) was an afterthought,
+  # and is held in a separate database.
+  set - "$@" "DEF:temp_supply=$RRD_FILE_HOUSE:temp_supply:MAX"
+
   # Because 'murca, temps are often expressed in F.
   set - "$@" "CDEF:temp_tank_f=temp_tank,1.8,*,32,+"
 
@@ -136,19 +142,21 @@ generate_water_heater_temps ()
 
   # Produce a visual indication of the periods when the pump
   # is off. These will be an area behind the temperature traces.
-   set - "$@" "CDEF:pump_background=pump_state,0,EQ,INF,UNKN,IF"
+  set - "$@" "CDEF:pump_background=pump_state,0,EQ,INF,UNKN,IF"
   #set - "$@" "CDEF:pump_off_area=1,pump_state,-,60*"
 
   # Pump state goes behind the temperatures.
   set - "$@" "AREA:pump_background#EAEAEA"
-   
+
   # Plot Temperatures for the parts of the system we care about.
   set - "$@" "LINE3:temp_tank${color0}: tank\g"
   set - "$@" "GPRINT:temp_tank:LAST: (%4.1lfC"
   set - "$@" "GPRINT:temp_tank_f:LAST: %4.1lfF)\t"
   set - "$@" "LINE3:temp_return${color1}: return\g"
-  set - "$@" "GPRINT:temp_return:LAST:(%4.1lfC)\t"
-  set - "$@" "GPRINT:temp_delta:LAST: delta %4.1lfC \t"
+  set - "$@" "GPRINT:temp_return:LAST: (%4.1lfC)\t"
+  set - "$@" "GPRINT:temp_delta:LAST: delta %4.1lfC \n"
+  set - "$@" "LINE3:temp_supply${color7}: supply\g"
+  set - "$@" "GPRINT:temp_supply:LAST: (%4.1lfC)\t"
 
   # Do we care about the temperature at the pump fitting?
   # Doesn't seem to change much with tank temperature.
@@ -160,7 +168,6 @@ generate_water_heater_temps ()
   
   # We don't really want to exceed this tank temperature.
   set - "$@" "HRULE:${MAX_TANK_TEMP}#cc5555"
-
   
   # Generate the plot
   #
@@ -204,44 +211,63 @@ generate_water_heater_temp_delta ()
 
 
 ###############################################################################
-# 2U COMPUTER FUNCTIONS
-generate_server_temps () {
-  CAM="$1" ; shift
+# HOST_GRAPHS
+generate_host_temps () {
   format="$1" ; shift
   draw_title="$1" ; shift
 
-  case "$CAM" in
-    h2rg)  RRD_FILE="$RRD_DIR/computers_dlcam1_server_temps_lt" ;;
-    h2rg2) RRD_FILE="$RRD_DIR/computers_dlcam2_server_temps_lt" ;;
-    *)
-      echo "error: No server temp RRD for $CAM."
-      exit 1
-      ;;
-  esac
-
+  RRD_FILE="$RRD_DIR/water_heater_host_lt"
+  
   set - --start "$start_sec" --end "$end_sec"
 
   if [ "$draw_title" == "draw_title" ] ; then
-    set - --title="$GRAPH_TITLE_server_temps"
+    set - --title="$GRAPH_TITLE_host_temps"
   fi
 
   # Add definition for micropirani pressure.
   #
   set - "$@" "DEF:cpu_temp=$RRD_FILE:cpu_temp:MAX"
-  set - "$@" "DEF:disk_temp=$RRD_FILE:disk_temp:MAX"
-  set - "$@" "DEF:sys_temp=$RRD_FILE:sys_temp:MAX"
-  set - "$@" "DEF:vrm_temp=$RRD_FILE:vrm_temp:MAX"
 
   # Draw a line and label it.
   #
-  set - "$@" "LINE2:cpu_temp$color0:CPU"
-  set - "$@" "GPRINT:cpu_temp:LAST: (%.0lf C)\t"
-  set - "$@" "LINE2:disk_temp$color1:Disk\g"
-  set - "$@" "GPRINT:disk_temp:LAST: (%.0lf C)\t"
-  set - "$@" "LINE2:sys_temp$color4:System"
-  set - "$@" "GPRINT:sys_temp:LAST: (%.0lf C)\t"
-  set - "$@" "LINE2:vrm_temp$color3:CPU VRM"
-  set - "$@" "GPRINT:vrm_temp:LAST: (%.0lf C)\t"
+  set - "$@" "LINE2:cpu_temp$color0: CPU"
+  set - "$@" "GPRINT:cpu_temp:LAST: (%.1lf C)\n"
+  
+  # Generate the plot
+  #
+  case "$format" in
+    png) $RRDGRAPH -M --lower-limit 0 - $GRAPHOPTS "$@" ;;
+    dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
+  esac
+}
+
+generate_host_mem () {
+  format="$1" ; shift
+  draw_title="$1" ; shift
+
+  RRD_FILE="$RRD_DIR/water_heater_host_lt"
+  
+  set - --start "$start_sec" --end "$end_sec"
+
+  if [ "$draw_title" == "draw_title" ] ; then
+    set - --title="$GRAPH_TITLE_host_mem"
+  fi
+
+  # Add definition for micropirani pressure.
+  #
+  set - "$@" "DEF:mem_avail=$RRD_FILE:mem_avail:MAX"
+  set - "$@" "DEF:mem_free=$RRD_FILE:mem_free:MAX"
+
+  # RRD values are in kiB. Stick to MiB to make things simpler.
+  set - "$@" "CDEF:mem_avail_mb=mem_avail,1024,/"
+  set - "$@" "CDEF:mem_free_mb=mem_free,1024,/"
+  
+  # Draw a line and label it.
+  #
+  set - "$@" "LINE2:mem_avail_mb$color2: Avail"
+  set - "$@" "GPRINT:mem_avail_mb:LAST: (%.1lf MiB)\t"
+  set - "$@" "LINE2:mem_free_mb$color4: Free"
+  set - "$@" "GPRINT:mem_free_mb:LAST: (%.1lf MiB)\n"
   
   # Generate the plot
   #
@@ -276,10 +302,14 @@ heform'], '$graph')\"><IMG BORDER=0 SRC=\"$SCRIPT_NAME?$QUERY_STRING&png=$graph\
 }
 
 ALL_GRAPHS="water_heater_temps \
-water_heater_temp_delta
+water_heater_temp_delta \
+host_mem \
+host_temps
 "
 GRAPH_TITLE_water_heater_temps="Water heater temperatures"
 GRAPH_TITLE_water_heater_temp_delta="Water heater temperature delta (return - tank)"
+GRAPH_TITLE_host_mem="RPi mem info"
+GRAPH_TITLE_host_temps="RPi host temps"
 
 generate_pulldown () {
   graph="$1"
@@ -312,6 +342,72 @@ set_defaults () {
   # Start with these graphs if they're not explicitly given.
   [ "$graph1" ] || graph1=water_heater_temps
   [ "$graph2" ] || graph2=water_heater_temp_delta
+}
+
+zoom_ago ()
+{
+  local op="$1"
+  local n="$2"
+  local units="$3"
+  local ago="$4"
+
+  shift
+
+  local original_time="$@"
+
+  # If the time given isn't a duration, then don't zoom.
+  if [ "$ago" != "ago" ] ; then
+    shift
+    echo "$original_time"
+    return
+  fi
+
+  case "$op" in
+    out) n=$((n*2)) ;;
+    in)
+      # Zooming in can be a little problematic. If we're at an odd number
+      # of units (or 1) then we can't divide that in half. Drop to the next
+      # set of units and bump the duration accordingly.
+      if [ $((n % 2)) -eq 1 ] ; then
+        case "$units" in
+
+	  month|month)
+	    n=$((n*30))
+	    units=day
+	    ;;
+
+	  week|week)
+	    n=$((n*7))
+	    units=day
+	    ;;
+
+	  day|days)
+	    n=$((n*24))
+	    units=hour
+	    ;;
+
+	  hour|hours)
+	    n=$((n*60))
+	    units=min
+	    ;;
+
+	  min|mins)
+	    n=$((n*60))
+	    units=sec
+	    ;;
+
+	  *) # At sec, we can't divide any further. Don't try.
+            echo "$original_time"
+	    return
+	    ;;
+
+	esac
+      fi
+
+      n=$((n/2))
+      ;;
+  esac
+  echo "$n $units ago"
 }
 
 ###############################################################################
@@ -377,8 +473,16 @@ dur_sec=$(( end_sec - start_sec ))
 
 if [ "$zoomout" ]; then
   if [ "$end" = "now" ]; then
-    start_sec=$(( start_sec - dur_sec / 2 ))
-    start=$start_sec
+
+    # If the graph starts a given period ago rather than
+    # at a fixed point, then try and modify that.
+    case "$start" in
+      *ago) start=`zoom_ago out $start` ;;
+      *)
+        start_sec=$(( start_sec - dur_sec / 2 ))
+        start=$start_sec
+	;;
+    esac
   else
     start_sec=$(( start_sec - dur_sec / 4 ))
     start=$start_sec
@@ -389,8 +493,17 @@ fi
 
 if [ "$zoomin" ]; then
   if [ "$end" = "now" ]; then
-    start_sec=$(( start_sec + dur_sec / 2 ))
-    start=$start_sec
+
+    # If the graph starts a given period ago rather than
+    # at a fixed point, then try and modify that.
+    case "$start" in
+      *ago) start=`zoom_ago in $start` ;;
+      *)
+        start_sec=$(( start_sec - dur_sec / 2 ))
+        start=$start_sec
+	;;
+    esac
+
   else
     start_sec=$(( start_sec + dur_sec / 4 ))
     start=$start_sec
@@ -406,6 +519,7 @@ if [ "$panleft" ]; then
   end=$end_sec
 fi
 
+echo "start_sec=$start_sec dur_sec=$dur_sec" 1>&2
 if [ "$panright" ]; then
   start_sec=$(( start_sec + dur_sec / 3 ))
   start=$start_sec
@@ -413,11 +527,24 @@ if [ "$panright" ]; then
   end=$end_sec
 fi
 
+# Produce a watermark for the bottom of the graph. This will
+# mark the graph with the date(s) for the data range in case
+# we save the image and use it somewhere else later.
+#start_date=$(date -d @$start_sec +%d-%b-%Y)
+#end_date=$(date -d @$end_sec +%d-%b-%Y)
+#if [ "$start_date" = "$end_date" ] ; then
+#  watermark="$start_date"
+#else
+#  watermark="$start_date -> $end_date"
+#fi
+#GRAPHOPTS="$GRAPHOPTS -W '$watermark'"
+
 # Provide an explicit date format so that we get the same as what we've historically
 # explected from Sidious, as 'date' has changed its mind on the default format since.
 # The image map javascript expects a fixed format here, so we need to play nice.
-start_date=`date -d "1970-01-01 UTC +$start_sec sec" "+%a %b %d %H:%d:%S %Z %Y"`
-end_date=`date -d "1970-01-01 UTC +$end_sec sec" "+%a %b %d %H:%d:%S %Z %Y"`
+start_date=`date -d @$start_sec "+%a %b %d %H:%M:%S %Z %Y"`
+end_date=`date -d @$end_sec "+%a %b %d %H:%M:%S %Z %Y"`
+
 [ "$start" != "$start_sec" ] || start=$start_date
 [ "$end" = "now" ] || end=$end_date
 [ "$stopfollow" ] && end=$end_date
@@ -562,7 +689,8 @@ fi
 case "$dataset" in
   water_heater_temps) generate_water_heater_temps $format ;;
   water_heater_temp_delta) generate_water_heater_temp_delta $format ;;
-#  server_temps) generate_server_temps $CAM $format ;;
+  host_mem) generate_host_mem $format ;;
+  host_temps) generate_host_temps $format ;;
 esac
 
 exit 0
