@@ -15,7 +15,7 @@
 MAX_TANK_TEMP=55.7 #C, 135F.
 
 # Times of day where control script will attempt to operate.
-CONTROL_DAY_BEGIN="8:20 am"
+CONTROL_DAY_BEGIN="8 am"
 CONTROL_DAY_END="5 pm"
 
 ####
@@ -68,6 +68,7 @@ SS_COMMENT_VOLT_TANK="[V] Voltage across water tank thermistor."
 SS_COMMENT_VOLT_PUMP="[V] voltage across pump sensor."
 SS_COMMENT_VOLT_RETURN="[V] Voltage across return line sensor."
 SS_COMMENT_VOLT_SUPPLY="[V] Voltage across house supply line sensor."
+
 # Info about host raspberry pi goes here.
 SS_PI_PATH="$SS_PATH/pi"
 
