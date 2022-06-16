@@ -9,14 +9,38 @@
 
 # Maximum tank temperature that the control script will
 # attempt to limit to.
-#
-# WARNING: SAFETY. Sticker on side of tank claims burns
+MAX_TANK_TEMP=57.2 # C.
+# ** WARNING: SAFETY ** Sticker on side of tank indicates burns
 # in seconds at 140F.
-MAX_TANK_TEMP=55.7 #C, 135F.
+#
+# The hottest tap is the kitchen sink; everything else is physically
+# further away and has higher losses. I'm not too worried about the showers
+# as they don't have separate hot/cold knobs (the risk of turning on 100%
+# hot water is low), but the bathroom sinks do. The kitchen tap has a mixer,
+# but the temptation is to throw it straight on high, and I don't know if
+# it allows 100% hot.
+#
+# On the other hand, some places (such as the UK solar trade association)
+# suggest 60C (140F) to kill bacteria in the tank.
 
-# Times of day where control script will attempt to operate.
+# Default times of day where control script will attempt to operate.
+# These are fallbacks, overrided by offsets based on sunrise and
+# sunset times to manage the varying day length through a year.
 CONTROL_DAY_BEGIN="8 am"
 CONTROL_DAY_END="5 pm"
+
+# Start and stop times relative to sunrise & sunset. Values are as
+# per 'sunwait's offset option, and are in hours:minutes.
+# Weirdly, a positive value is added to the sunrise time, but is
+# subtracted from sunset.
+CONTROL_DAY_SUNRISE_OFFSET="+2:10"
+CONTROL_DAY_SUNSET_OFFSET="+2:15"
+
+# To calculate sunrise & sunset times, we need a location.
+# Passed to 'sunwait', which seems happy enough to take lat/lon
+# positions with N/S and W/E suffixes. Obviously not particularly
+# close to home, but more than close enough for figuring out times.
+SUNWAIT_POS="21.261944N 157.806044W"
 
 ####
 # STATUS FILE
@@ -38,6 +62,8 @@ SS_PATH=/water_heater
 SS_STATUS="$SS_PATH/status"
 SS_PUMP_STATE="$SS_PATH/pump_state"
 SS_CONTROL_STATE="$SS_PATH/control_state"
+SS_DAY_BEGIN="$SS_PATH/day_begin"
+SS_DAY_END="$SS_PATH/day_end"
 SS_TEMP_TANK="$SS_PATH/temp_tank"
 SS_TEMP_PUMP="$SS_PATH/temp_pump"
 SS_TEMP_RETURN="$SS_PATH/temp_return"
@@ -55,7 +81,8 @@ SS_VOLT_SUPPLY="$SS_PATH/volt_supply"
 SS_COMMENT_STATUS="General status indication."
 SS_COMMENT_PUMP_STATE="[0|1] Boolean pump status."
 SS_COMMENT_CONTROL_STATE="Current control loop state"
-SS_COMMENT_CONT_STATE="Current state of control loop."
+SS_COMMENT_DAY_BEGIN="Time when day begins (24h format)."
+SS_COMMENT_DAY_END="Time when day ends (24h format)."
 SS_COMMENT_TEMP_TANK="[C] Temperature measured from water tank."
 SS_COMMENT_TEMP_PUMP="[C] Temperature measured at water pump fitting."
 SS_COMMENT_TEMP_RETURN="[C] Temperature measured on return from heater panel."

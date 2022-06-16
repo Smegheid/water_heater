@@ -48,6 +48,8 @@ ssPut "$SS_VOLT_PUMP" "$volt_pump" "COMMENT=$SS_COMMENT_VOLT_PUMP" "LIFETIME=$li
 ssPut "$SS_VOLT_RETURN" "$volt_return" "COMMENT=$SS_COMMENT_VOLT_RETURN" "LIFETIME=$lifetime"
 ssPut "$SS_VOLT_SUPPLY" "$volt_supply" "COMMENT=$SS_COMMENT_VOLT_SUPPLY" "LIFETIME=$lifetime"
 ssPut "$SS_STATUS" "$status" "COMMENT=$SS_COMMENT_STATUS" "LIFETIME=$lifetime"
+ssPut "$SS_DAY_BEGIN" "$day_begin" "COMMENT=$SS_COMMENT_DAY_BEGIN" "LIFETIME=$lifetime"
+ssPut "$SS_DAY_END" "$day_end" "COMMENT=$SS_COMMENT_DAY_END" "LIFETIME=$lifetime"
 
 # Translate text pump status into a value for the graphs.
 case "$pump_state" in

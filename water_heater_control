@@ -33,6 +33,7 @@ STATUS_LIFETIME=$((UPDATE_PERIOD * 3))
 # States for the state machine. Using strings to
 # make this easier to follow.
 STATE_INIT="init"                # Entry state.
+STATE_DAYTIME_ENDED="dayend"       # Daylight hours are over. Transitions out of current state to waiting.
 STATE_WAIT_FOR_DAYTIME="waitday" # Failsafe; sits here with pump off if it's not daytime heating hours.
 STATE_WAIT_START="waitstart"     # Sun is up, pump off, monitoring panel temp for when to turn pump on.
 STATE_START_PUMP="pumpstart"     # Transition/delay state when turning pump on.
@@ -40,7 +41,7 @@ STATE_TEST_PANEL_HOT="testpanel" # Short delay to test whether panel can actuall
 STATE_TANK_HEATING="heating"     # Pump is on, monitoring hot water being made.
 STATE_STOP_PUMP="pumpstop"       # Transition/delay state when turning pump off.
 STATE_PUMP_OFF_DELAY="pumpoffdelay"  # Pump has been turned off. Delay before we start making decisions again.
-STATE_DAYTIME_END="sleepytime"   # Daylight hours are over. Transitions out of current state to waiting.
+
 
 # Wait time following pump being turned off adjusts based on how
 # often the pump is turned off and how long it consistently runs for.
@@ -131,15 +132,16 @@ update_status ()
   # The content of this file should be able to be sourced by a bourne
   # shell in order to be turned into a series of variables.
   #
-  # REMINDER: all string values must be quoted in spaces appear.
+  # REMINDER: all string values must be quoted in case spaces appear.
   echo "#
 #        time: UNIX time of update.
 #    lifetime: [s] Duration after which status info is no longer valid.
 #      expiry: UNIX time after which info is assumed to have expired. Effectively time + lifetime.
 #      status: $SS_COMMENT_STATUS
 #control_state: current control loop state
+#   day_begin: $SS_COMMENT_DAY_BEGIN
+#     day_end: $SS_COMMENT_DAY_END
 #  pump_state: $SS_COMMENT_PUMP_STATE
-#  cont_state: $SS_COMMENT_CONT_STATE
 #   temp_tank: $SS_COMMENT_TEMP_TANK
 # temp_return: $SS_COMMENT_TEMP_RETURN
 #   temp_pump: $SS_COMMENT_TEMP_PUMP
@@ -158,6 +160,8 @@ lifetime=$STATUS_LIFETIME
 expiry=$((now + STATUS_LIFETIME ))
 status=OK
 control_state=\"$state\"
+day_begin=$DAY_BEGIN
+day_end=$DAY_END
 pump_state=$pump_state
 temp_tank=$temp_tank
 temp_return=$temp_return
@@ -196,8 +200,8 @@ daytime ()
   local now=$(date +%s)
 
   # figure out when daylight begins and ends.
-  local begin=$(date -d "$CONTROL_DAY_BEGIN" +%s)
-  local end=$(date -d "$CONTROL_DAY_END" +%s)
+  local begin=$(date -d "$DAY_BEGIN" +%s)
+  local end=$(date -d "$DAY_END" +%s)
 
   # Before the beginning of sunny time? Barf.
   [ $now -lt $begin ] && return 1
@@ -218,12 +222,13 @@ state_check_daytime_over ()
   # If we're definitely not running, then this isn't applicable.
   case "$state" in
     $STATE_INIT) return 0 ;;
+    $STATE_DAYTIME_ENDED) return 0 ;;
     $STATE_WAIT_FOR_DAYTIME) return 0 ;;
   esac
 
   if ! daytime ; then
     echo "Daylight has ended while in '$state' state."
-    state=$STATE_DAYTIME_END
+    state=$STATE_DAYTIME_ENDED
   fi
 
   return 0
@@ -417,6 +422,32 @@ pump_off_wait_adjust ()
   echo "TEST: pump off wait $1 to $pump_off_wait sec @ $pump_off_adj_time."
 }
 
+
+# Calculate the the beginning and end times based on
+# sunrise and sunset for this time of year.
+get_day_times ()
+{
+  # %%% Technically this calculates today's sunrise time, but we
+  # might be running after sunset to figure out tomorrow's start
+  # time. In reality, this will be no more than about a minute off
+  # on a day to day basis in this part of the world, so I don't
+  # care too much for the initialversion. If it continues to
+  # nag at me, I'll fix it later.
+  DAY_BEGIN=$(sunwait rise list 1 offset "$CONTROL_DAY_SUNRISE_OFFSET" $SUNWAIT_POS)
+  if [ $? -ne 0 ] ; then
+    echo "warning: Failed to calculate sunrise time."
+    DAY_BEGIN=$CONTROL_DAY_BEGIN
+  fi
+
+  DAY_END=$(sunwait set list 1 offset "$CONTROL_DAY_SUNSET_OFFSET" $SUNWAIT_POS)
+  if [ $? -ne 0 ] ; then
+    echo "warning: Failed to calculate sunset time."
+    DAY_END=$CONTROL_DAY_END
+  fi
+
+  echo "TEST: day times $DAY_BEGIN -> $DAY_END"
+}
+
 ########################
 # State handlers.
 #
@@ -439,8 +470,25 @@ state_handler_init ()
   # Until we figure things out for ourselves, we always
   # turn the pump off.
   pump_control $PUMP_CONTROL_OFF
-
+  
   # We begin by checking to see if it's daytime.
+  state_new="$STATE_DAYTIME_ENDED"
+}
+
+# Handles case where we know (based on time) that there is insufficient
+# sunlight to heat water. Transitions through to waiting for the next
+# day to begin.
+state_handler_daytime_ended ()
+{
+  echo "Daytime done. Turning off pump, waiting for tomorrow."
+  pump_control $PUMP_CONTROL_OFF
+
+  # Calculate new day start/end times based on time of year.
+  set -x
+  get_day_times
+set +x
+  
+  # Wait for the new day to begin.
   state_new="$STATE_WAIT_FOR_DAYTIME"
 }
 
@@ -589,14 +637,6 @@ state_handler_stop_pump ()
   state_new=$STATE_PUMP_OFF_DELAY
 }
 
-# Handles case where the sun is unavailable to heat water.
-state_handler_daytime_end ()
-{
-  echo "Daytime done. Turning off pump, waiting for tomorrow."
-  pump_control $PUMP_CONTROL_OFF
-  state_new="$STATE_WAIT_FOR_DAYTIME"
-}
-
 # Waits for a set period of time after turning the pump off.
 PUMP_OFF_DELAY_TIME=$((15 * 60 )) # seconds
 state_handler_pump_off_delay ()
@@ -645,6 +685,7 @@ set -x
     case "$state" in
 
       $STATE_INIT) state_handler_init ;;
+      $STATE_DAYTIME_ENDED) state_handler_daytime_ended ;;
       $STATE_WAIT_FOR_DAYTIME) state_handler_wait_for_daytime ;;
       $STATE_WAIT_START) state_handler_wait_start ;;
       $STATE_START_PUMP) state_handler_start_pump ;;
@@ -652,10 +693,6 @@ set -x
       $STATE_TANK_HEATING) state_handler_tank_heating ;;
       $STATE_STOP_PUMP) state_handler_stop_pump ;;
       $STATE_PUMP_OFF_DELAY) state_handler_pump_off_delay ;;
-
-      # Daytime has ended. Turn off the pump, settle into waiting
-      # for the sun to come back up again.
-      $STATE_DAYTIME_END) state_handler_daytime_end ;;
 
       *)
         echo "warning: Unknown state '$state'. Restarting."
@@ -676,6 +713,13 @@ set +x
 }
 
 ##########################################################################
+
+# We use `sunwait` to calculate sunrise and sunset times. If this is
+# not available, then we fall back on fixed times for considering the
+# start and end of the day, which isn't optikmal.
+if ! which sunwait > /dev/null ; then
+  echo "warning: 'sunwait' not found. Falling back on fixed day start/end times."
+fi  
 
 # Start the state machine from the beginning.
 state=$STATE_INIT

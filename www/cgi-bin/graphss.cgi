@@ -23,6 +23,10 @@ SSGETCMT=/gpc/bin/ssGetCmt
 # Last control loop state.
 control_state=$($SSGET "$SS_CONTROL_STATE")
 
+# Times where we're allowed to run.
+day_begin=$($SSGET "$SS_DAY_BEGIN")
+day_end=$($SSGET "$SS_DAY_END")
+
 # Name of the script determines which camera we're on.
 case "$(basename $0)" in
   graphss_h2rg.cgi)
@@ -108,6 +112,8 @@ THUMBOPTS="-h 76 -w 76 -j"
 
 ###############################################################################
 # HEATER CONTROL GRAPHS
+
+# Main display of system temperatures.
 generate_water_heater_temps ()
 {
   format="$1" ; shift
@@ -115,7 +121,6 @@ generate_water_heater_temps ()
 
   RRD_FILE="$RRD_DIR/water_heater_temps_lt"
   RRD_FILE_HOUSE="$RRD_DIR/water_tank_supply_lt"
-
   
   set - --start "$start_sec" --end "$end_sec"
 
@@ -156,7 +161,7 @@ generate_water_heater_temps ()
   set - "$@" "GPRINT:temp_return:LAST: (%4.1lfC)\t"
   set - "$@" "GPRINT:temp_delta:LAST: delta %4.1lfC \n"
   set - "$@" "LINE3:temp_supply${color7}: supply\g"
-  set - "$@" "GPRINT:temp_supply:LAST: (%4.1lfC)\t"
+  set - "$@" "GPRINT:temp_supply:LAST: (%4.1lfC)\n"
 
   # Do we care about the temperature at the pump fitting?
   # Doesn't seem to change much with tank temperature.
@@ -177,6 +182,53 @@ generate_water_heater_temps ()
   esac
 }
 
+# Autoscaled water tank temperature only.
+generate_water_tank_temp ()
+{
+  format="$1" ; shift
+  draw_title="$1" ; shift
+
+  RRD_FILE="$RRD_DIR/water_heater_temps_lt"
+  RRD_FILE_HOUSE="$RRD_DIR/water_tank_supply_lt"
+
+  set - --start "$start_sec" --end "$end_sec"
+
+  if [ "$draw_title" == "draw_title" ] ; then
+    set - --title="$GRAPH_TITLE_generate_water_tank_temp"
+  fi
+
+  # Info from the database. We care about the tank temperature
+  # and the state of the pump.
+  set - "$@" "DEF:temp_tank=$RRD_FILE:temp_tank:MAX"
+  set - "$@" "DEF:pump_state=$RRD_FILE:pump_state:MAX"
+
+  # Because 'murca, temps are often expressed in F.
+  set - "$@" "CDEF:temp_tank_f=temp_tank,1.8,*,32,+"
+
+  # Produce a visual indication of the periods when the pump
+  # is off. These will be an area behind the temperature traces.
+  set - "$@" "CDEF:pump_background=pump_state,0,EQ,INF,UNKN,IF"
+
+  # Pump state goes behind the temperatures.
+  set - "$@" "AREA:pump_background#EAEAEA"
+
+  # Plot Temperatures for the parts of the system we care about.
+  set - "$@" "LINE3:temp_tank${color0}: tank\g"
+  set - "$@" "GPRINT:temp_tank:LAST: (%4.1lfC"
+  set - "$@" "GPRINT:temp_tank_f:LAST: %4.1lfF)\n"
+
+  # We don't really want to exceed this tank temperature.
+  set - "$@" "HRULE:${MAX_TANK_TEMP}#cc5555"
+
+  # Generate the plot
+  #
+  case "$format" in
+    png) $RRDGRAPH -A --left-axis-format "%.1lf" - $GRAPHOPTS "$@" ;;
+    dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
+  esac
+}
+
+# Autoscaled view of difference between the return and tank temperatures.
 generate_water_heater_temp_delta ()
 {
   format="$1" ; shift
@@ -200,6 +252,11 @@ generate_water_heater_temp_delta ()
   # Plot Temperatures for the parts of the system we care about.
   set - "$@" "LINE3:temp_delta${color3}: Temp delta\g"
   set - "$@" "GPRINT:temp_delta:LAST: (%4.1lfC)\n"
+
+  # rrdgraph doesn't show the y origin on the plot. Make it a
+  # little more obvious - this is a delta that will usually be above
+  # while operating and below when the pump is off.
+  set - "$@" "HRULE:0#a0a0a0"
   
   # Generate the plot
   #
@@ -302,11 +359,13 @@ heform'], '$graph')\"><IMG BORDER=0 SRC=\"$SCRIPT_NAME?$QUERY_STRING&png=$graph\
 }
 
 ALL_GRAPHS="water_heater_temps \
+water_tank_temp \
 water_heater_temp_delta \
 host_mem \
 host_temps
 "
 GRAPH_TITLE_water_heater_temps="Water heater temperatures"
+GRAPH_TITLE_water_tank_temp="&nbsp;&nbsp;&nbsp;Water tank temperature (autoscaled)"
 GRAPH_TITLE_water_heater_temp_delta="Water heater temperature delta (return - tank)"
 GRAPH_TITLE_host_mem="RPi mem info"
 GRAPH_TITLE_host_temps="RPi host temps"
@@ -602,7 +661,10 @@ cat <<EOF
 
       <TD WIDTH=10><INPUT TYPE=submit NAME=plot VALUE=" Apply " DEFAULT></TD>
       <TD ALIGN=RIGHT WIDTH=10><INPUT TYPE=submit NAME=reset VALUE= " Reset "></TD>
-      <TD ALIGN=LEFT WIDTH=100%><FONT SIZE=-1>State: $control_state</FONT></TD>
+      <TD><TABLE CELLPADDING=0 CELLSPACING=0>
+        <TR><TD ALIGN=LEFT><FONT SIZE=-1>State: $control_state</FONT></TD></TR>
+        <TR><TD ALIGN=LEFT><FONT SIZE=-1>$day_begin &rarr; $day_end</FONT></TD></TR>
+      </TABLE></TD>
     </TR>
     <TR>
       <TD ALIGN=RIGHT>To:  </TD><TD><INPUT TYPE=text NAME=end VALUE="$end" SIZE=28></TD>
@@ -610,11 +672,11 @@ EOF
 if [ "$end" = "now" ]; then
   cat <<EOF
       <TD COLSPAN=2><INPUT TYPE=submit NAME=stopfollow VALUE=" Stop Updating . . . "></TD>
-      <TD><FONT SIZE=-1>Last Update `date +%r`</FONT></TD>
+      <TD COLSPAN=2><FONT SIZE=-1>Last Update `date +%R:%S`</FONT></TD>
 EOF
 else
   cat <<EOF
-      <TD COLSPAN=2 WIDTH=20><INPUT TYPE=submit NAME=follow VALUE="  Follow Current  "></TD><TD></TD>
+      <TD WIDTH=20><INPUT TYPE=submit NAME=follow VALUE="  Follow Current  "></TD><TD></TD>
 EOF
 fi
 cat<<EOF
@@ -688,6 +750,7 @@ fi
 
 case "$dataset" in
   water_heater_temps) generate_water_heater_temps $format ;;
+  water_tank_temp) generate_water_tank_temp $format ;;
   water_heater_temp_delta) generate_water_heater_temp_delta $format ;;
   host_mem) generate_host_mem $format ;;
   host_temps) generate_host_temps $format ;;
