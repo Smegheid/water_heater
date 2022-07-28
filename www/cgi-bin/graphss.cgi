@@ -5,7 +5,7 @@
 # So that this CGI script does not have to generate
 # any temporary files.
 
-exec 2> /tmp/graphss.err
+exec 2>> /tmp/graphss.err
 
 
 RRD_DIR=/gpc/conf/rrd
@@ -27,42 +27,12 @@ control_state=$($SSGET "$SS_CONTROL_STATE")
 day_begin=$($SSGET "$SS_DAY_BEGIN")
 day_end=$($SSGET "$SS_DAY_END")
 
-# Name of the script determines which camera we're on.
-case "$(basename $0)" in
-  graphss_h2rg.cgi)
-    CAM=h2rg
-    CAMNAME="H2RG Cam 1"  
-    ;;
-  graphss_h2rg2.cgi)
-    CAM=h2rg2
-    CAMNAME="H2RG Cam 2"  
-    ;;
-esac
+# Default to lab-style colours.
+COLOR_PANEL="#003399"
+COLOR_BG="#000080"
 
-# Camera-specific colours.
-case "$CAM" in
-
-  # DL cam 1 is based on a green colour scheme.
-  h2rg)
-    COLOR_PANEL="DarkGreen"
-    COLOR_BG="DarkGreen"
-    COLOR_FG="LightGrey"
-    COLOR_LINK="LightGreen"
-    ;;
-    
-  # DL cam 2 is based on a dark blue scheme.
-  h2rg2)
-    COLOR_PANEL="DarkBlue"
-    COLOR_BG="MidnightBlue"
-    COLOR_FG="LightGrey"
-    COLOR_LINK="LightBlue"
-    ;;
-
-  *) # Default to lab-style colours.
-    COLOR_PANEL="#e8c870"
-    COLOR_BG="#503010"
-    ;;
-esac
+COLOR_FG="#dddddd"
+COLOR_LINK="$COLOR_FG"
 
 color0="#dd1111"
 color1="#ccb050"
@@ -177,7 +147,7 @@ generate_water_heater_temps ()
   # Generate the plot
   #
   case "$format" in
-    png) $RRDGRAPH -A --upper-limit 60 --lower-limit 28 --rigid - $GRAPHOPTS "$@" ;;
+    png) $RRDGRAPH -A --upper-limit 60.5 --lower-limit 27.5 --rigid - $GRAPHOPTS "$@" ;;
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
 }
@@ -226,6 +196,8 @@ generate_water_tank_temp ()
     png) $RRDGRAPH -A --left-axis-format "%.1lf" - $GRAPHOPTS "$@" ;;
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
+
+  echo "GRAPHOPTS='$GRAPHOPTS' $@" 1>&2
 }
 
 # Autoscaled view of difference between the return and tank temperatures.
@@ -536,7 +508,11 @@ if [ "$zoomout" ]; then
     # If the graph starts a given period ago rather than
     # at a fixed point, then try and modify that.
     case "$start" in
-      *ago) start=`zoom_ago out $start` ;;
+      *ago)
+	start=`zoom_ago out $start`
+	dur_sec=$((dur_sec * 2))
+        start_sec=$(( end_sec - dur_sec ))
+	;;
       *)
         start_sec=$(( start_sec - dur_sec / 2 ))
         start=$start_sec
@@ -550,13 +526,19 @@ if [ "$zoomout" ]; then
   fi
 fi
 
+echo "zoomin=$zoomin zoomout=$zoomout start_sec=$start_sec end_sec=$end_sec dur_sec=$dur_sec start=$start end=$end" 1>&2
+
 if [ "$zoomin" ]; then
   if [ "$end" = "now" ]; then
 
     # If the graph starts a given period ago rather than
     # at a fixed point, then try and modify that.
     case "$start" in
-      *ago) start=`zoom_ago in $start` ;;
+      *ago)
+        start=`zoom_ago in $start`
+	dur_sec=$((dur_sec / 2))
+        start_sec=$(( end_sec - dur_sec ))
+	;;
       *)
         start_sec=$(( start_sec - dur_sec / 2 ))
         start=$start_sec
@@ -573,9 +555,7 @@ fi
 
 if [ "$panleft" ]; then
   start_sec=$(( start_sec - dur_sec / 3 ))
-  start=$start_sec
   end_sec=$(( end_sec - dur_sec / 3 ))
-  end=$end_sec
 fi
 
 echo "start_sec=$start_sec dur_sec=$dur_sec" 1>&2
