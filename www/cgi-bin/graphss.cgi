@@ -147,7 +147,7 @@ generate_water_heater_temps ()
   # Generate the plot
   #
   case "$format" in
-    png) $RRDGRAPH -A --upper-limit 60.5 --lower-limit 27.5 --rigid - $GRAPHOPTS "$@" ;;
+    png) $RRDGRAPH -A --upper-limit 62.5 --lower-limit 27.5 --rigid - $GRAPHOPTS "$@" ;;
     dat) $RRDFETCH "$RRD_FILE" MAX --start "$start_sec" --end "$end_sec" ;;
   esac
 }

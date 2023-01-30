@@ -10,6 +10,8 @@
 # Maximum tank temperature that the control script will
 # attempt to limit to.
 MAX_TANK_TEMP=57.2 # C.
+MAX_TANK_TEMP=62
+
 # ** WARNING: SAFETY ** Sticker on side of tank indicates burns
 # in seconds at 140F.
 #
@@ -23,6 +25,9 @@ MAX_TANK_TEMP=57.2 # C.
 # On the other hand, some places (such as the UK solar trade association)
 # suggest 60C (140F) to kill bacteria in the tank.
 
+TANK_TEMP_HYST=2 # C
+TANK_TEMP_RESTART=$((MAX_TANK_TEMP - TANK_TEMP_HYST))
+
 # Default times of day where control script will attempt to operate.
 # These are fallbacks, overrided by offsets based on sunrise and
 # sunset times to manage the varying day length through a year.
@@ -33,8 +38,8 @@ CONTROL_DAY_END="5 pm"
 # per 'sunwait's offset option, and are in hours:minutes.
 # Weirdly, a positive value is added to the sunrise time, but is
 # subtracted from sunset.
-CONTROL_DAY_SUNRISE_OFFSET="+2:10"
-CONTROL_DAY_SUNSET_OFFSET="+2:15"
+CONTROL_DAY_SUNRISE_OFFSET="+1:20"
+CONTROL_DAY_SUNSET_OFFSET="+1:20"
 
 # To calculate sunrise & sunset times, we need a location.
 # Passed to 'sunwait', which seems happy enough to take lat/lon
