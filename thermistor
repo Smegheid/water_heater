@@ -12,6 +12,17 @@ conv = SH_converter(A, B, C)
 # Resistance from command line.
 R=int(sys.argv[1])
 
+# For the current arrangement (divider with 10k fixed R and 5V supply) things go AWOL
+# below ~25C because our stupid ADC only operates up to 2.5V. The real fix for this is
+# to switch the divider over to the 2.5V supply from the Pi's GPIO header and tweak the
+# scaling in the adc code, but for now, this should keep things working by faking a low
+# temperature.
+FAIL_TEMP=24
+if (R is None ) or (R == 0) :
+  print("R=%d => no valid temperature, treating as %d." % (R, FAIL_TEMP), file=sys.stderr)
+  print("%d" %(FAIL_TEMP))
+  exit(0)
+
 # Convert to temp (C).
 T=conv.temperature(R)
 
